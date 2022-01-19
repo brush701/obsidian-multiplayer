@@ -1,0 +1,24 @@
+/* Sets all the text color to red! */
+.remote-caret {
+    position: absolute;
+    border-left: black;
+    border-left-style: solid;
+    border-left-width: 2px;
+    height: 1em;
+  }
+  .remote-caret > div {
+    position: relative;
+    top: -1.05em;
+    font-size: 13px;
+    background-color: rgb(0, 129, 0);
+    font-family: serif;
+    font-style: normal;
+    font-weight: normal;
+    line-height: normal;
+    user-select: none;
+    color: white;
+    padding-left: 2px;
+    padding-right: 2px;
+    z-index: 3;
+  }
+  
