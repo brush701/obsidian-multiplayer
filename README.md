@@ -4,7 +4,7 @@ This is a real-time collaboration plugin for [Obsidian](https://obsidian.md).
 
 The goal is to achieve functionality similar to Google Docs by building on top of [Yjs](www.yjs.dev). 
 
-**Note:** This plugin is still in early alpha and definitely has bugs, which could result in loss of data! Please back up your vaults before use.
+**Note:** This plugin is still in development and is pre-alpha. It definitely has bugs, which could result in loss of data! Please back up your vaults before use. I don't have a lot of time to work on it right now, so collaborators are welcome!
 
 ### Creating a Room
 Collaboration is built around the notion of Rooms: groups of files which are simultaneously editable by many users. Unlike Google Docs, we do not provide fine-grained permissioning. Everything is built on top of the Yjs WebRTC connector, which is fundamentally peer-to-peer. There are no administrators. Any user that has the Room's ID and password can access and modify its contents. Access can only be revoked by generating a new ID and password for the room.
