@@ -1,0 +1,10 @@
+{
+	"id": "obsidian-multiplayer",
+	"name": "Multiplayer",
+	"version": "0.1.0",
+	"minAppVersion": "0.12.0",
+	"description": "This is a real time collaboration plugin for Obsidian.",
+	"author": "Ben Rush",
+	"authorUrl": "https://github.com/brush701",
+	"isDesktopOnly": false
+}
