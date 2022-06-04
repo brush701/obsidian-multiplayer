@@ -18,6 +18,7 @@ import { EditorState, StateField, Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { around } from "monkey-around"
 import * as random from 'lib0/random'
+import { createHash } from 'crypto'
 
 interface MultiplayerSettings {
   rooms: RoomSettings[];
@@ -28,10 +29,12 @@ const DEFAULT_SETTINGS: MultiplayerSettings = {
 };
 
 const LEVELDB_PERSISTENCE_NAME = 'multiplayer.db';
-
+const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com, wss://y-webrtc-signaling-us.herokuapp.com'
 interface RoomSettings {
   name: string
   path: string 
+  signalingServers?: string[]
+  password?: string
 }
 
 class Room {
@@ -41,10 +44,13 @@ class Room {
   path: string
   name: string
 
-  constructor({name, path}: RoomSettings) {
+  constructor({name, path, signalingServers, password}: RoomSettings) {
     this.doc = new Y.Doc()
     this.persistence = new IndexeddbPersistence(name, this.doc)
-    this.provider = new WebrtcProvider(name, this.doc);
+    this.provider = new WebrtcProvider(name, this.doc, {
+      signaling: signalingServers || DEFAULT_SIGNALING_SERVERS.split(','),
+      password: password
+    });
     this.path = path
     this.name = name
   }
@@ -98,13 +104,13 @@ export default class Multiplayer extends Plugin {
       onLoadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
           const cm = this.editor.cm;
-          console.log(file)
           if (cm) {
             cm.state.fileName = file.path;
 
             const room = Multiplayer.getRoom(cm.state.fileName) 
             if (room) {
-              const yText = room.doc.getText('codemirror')
+              const fileName = cm.state.fileName.toLowerCase()
+              const yText = room.doc.getText(fileName)
               const undoManager = new Y.UndoManager(yText)
 
               room.provider.awareness.setLocalStateField('user', {
@@ -112,8 +118,8 @@ export default class Multiplayer extends Plugin {
                 color: userColor.color,
                 colorLight: userColor.light
               })
-
-              app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(yCollab(yText, room.provider.awareness, { undoManager }))
+              cm.state.ybinding = yCollab(yText, room.provider.awareness, { undoManager })
+              app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(cm.state.ybinding)
               app.workspace.updateOptions()
 
               console.log("binding yjs")
@@ -125,36 +131,31 @@ export default class Multiplayer extends Plugin {
       }
     });
 
-    // const patchOnUnloadFile = around(MarkdownView.prototype, {
-    //   // replace MarkdownView.onUnloadFile() with the following function
-    //   onUnloadFile(old) { // old is the original onUnloadFile function
-    //     return function (file) { // onUnloadFile takes one argument, file
-    //       const cm = this.editor.cm;
-    //       if (cm && cm.state.ybinding) {
-    //         app.plugins.plugins['obsidian-multiplayer'].unregisterEditorExtension(cm.state.ybinding)
-    //         cm.state.ybinding.destroy()
-    //         console.log("unbinding yjs")
-    //       }
-    //       return old.call(this, file); // now call the orignal function and bind the current scope to it
-    //     }
-    //   }
-    // });
-    
+    const patchOnUnloadFile = around(MarkdownView.prototype, {
+      // replace MarkdownView.onLoadFile() with the following function
+      onUnloadFile(old) { // old is the original onLoadFile function
+        return function (file) { // onLoadFile takes one argument, file
+          const cm = this.editor.cm;
+          if (cm) {
+            cm.state.fileName = file.path;
+
+            const room = Multiplayer.getRoom(cm.state.fileName) 
+            if (room) {
+              room.provider.destroy()
+              room.persistence.destroy()
+              console.log("unbinding yjs")
+
+            }
+          }
+
+          return old.call(this, file); // now call the orignal function and bind the current scope to it
+        }
+      }
+    });
+
     // register the patches with Obsidian's register method so that it gets unloaded properly
     this.register(patchOnLoadFile);
-    //this.register(patchOnUnloadFile);
-
-    // for every editor that is loaded, bind the yjs provider to it if it's a room
-    // this.registerCodeMirror((cm: CodeMirror.Editor) => { 
-    //   console.log("registering codemirror")
-    //   const room = this.getRoom(cm.state.fileName) 
-    //   console.log(room)
-    //   if (room) {
-    //     const yText = room.doc.getText('codemirror')
-    //     cm.state.ybinding = new CodemirrorBinding(yText, cm, room.provider.awareness)
-    //     console.log("binding yjs")
-    //   }
-    // })
+    this.register(patchOnUnloadFile);
   
   }
 
@@ -192,43 +193,92 @@ class RoomModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('modal-style-multiplayer');
     contentEl.empty();
-   
-    contentEl.createEl("h2", { text: "Create a new room" });
-    contentEl.createEl("form", "form-multiplayer",
-     (form) => {
-
-        form.createEl("label", {
-          attr: { for: "room-name" },
-          text: "Room name"
-        })
-
-        form.createEl("input", {
-          type: "text",
-          attr: {
-            name: "name",
-            id: "room-name"
-          },
-          placeholder: "Room name",
-        });
-
-        form.createEl("button", {
-          text: "Create",
-          type: "submit",
-        });
-
-        form.onsubmit = async (e) => {
-          e.preventDefault();
-          const name = form.querySelector('input[name="name"]').value;
-          const path = this.folder.path
-          if (this.plugin.settings.rooms.find(room => room.name !== name)) {
-            this.plugin.settings.rooms.push({name, path})
-            this.plugin.saveSettings();
-            this.plugin.rooms.push(new Room({name, path}))
-          }
-
-          this.close();
-        }
+    const room = this.plugin.rooms.find(room => this.folder.path.contains(room.path))
+    if (room) {
+      contentEl.createEl("h2", { text: "Room already exists" });
+      contentEl.createEl('p', { text: 'This folder is already a multiplayer room.'})
+      contentEl.createEl('p', { text: 'If you want to change the settings, please delete the room first.'})
+      const button = contentEl.createEl('button', { text: 'Delete Room', attr: { class: 'btn btn-danger' } })
+      button.onClickEvent((ev) => {
+        this.plugin.settings.rooms = this.plugin.settings.rooms.filter(el => el.path !== room.path)
+        this.plugin.saveSettings()
+        this.close()
       })
+    } else {
+      contentEl.createEl("h2", { text: "Create a new room" });
+      contentEl.createEl("form", "form-multiplayer",
+      (form) => {
+
+          form.createEl("label", {
+            attr: { for: "room-name" },
+            text: "Room name"
+          })
+
+          form.createEl("input", {
+            type: "text",
+            attr: {
+              name: "name",
+              id: "room-name"
+            },
+            placeholder: "Room name",
+          });
+          
+          form.createEl("label", {
+            attr: { for: "room-password" },
+            text: "Optional password"
+          })
+
+          form.createEl("input", {
+            type: "password",
+            attr: {
+              name: "password",
+              id: "room-password"
+            },
+            placeholder: "Room password",
+          });
+
+          form.createEl("label", {
+            attr: { for: "room-servers" },
+            text: "Optional signaling servers"
+          })
+
+          form.createEl("input", {
+            type: "text",
+            attr: {
+              name: "servers",
+              id: "room-servers"
+            },
+            placeholder: "wss://signaling.yjs.dev",
+          });
+
+          form.createEl("button", {
+            text: "Create",
+            type: "submit",
+          });
+
+          form.onsubmit = async (e) => {
+            e.preventDefault();
+            const name = form.querySelector('input[name="name"]').value;
+            const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
+            const signalingServers = servers.split(',');
+
+            const rooms = this.plugin.settings.rooms
+            if (rooms.find(room => room.name === name)) {
+              alert('A room with this name already exists.')
+              return
+            }
+
+            const password = form.querySelector('input[name="password"]').value;
+            const path = this.folder.path
+            this.plugin.settings.rooms.push({name, path, signalingServers, password})
+            this.plugin.saveSettings();
+            this.plugin.rooms.push(new Room({name, path, signalingServers, password}))
+          
+
+            this.close();
+          }
+        })
+      }
   }
 
   onClose() {
