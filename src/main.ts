@@ -16,6 +16,7 @@ import { WebrtcProvider } from 'y-webrtc'
 
 import { yCollab } from 'y-codemirror.next'
 import { Extension} from '@codemirror/state'
+import { EditorView } from "@codemirror/view";
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { around } from "monkey-around"
 import * as random from 'lib0/random'
@@ -79,8 +80,9 @@ class SharedFolder {
       if (doc !== undefined) {
         return doc
       } 
-    }
-    if (create) // Possible for id to be found but SharedDoc to be missing
+    } 
+
+    if (create) 
       return this.createDoc(path)
     else
       throw new Error('No shared doc for path: ' + path)
@@ -92,15 +94,11 @@ class SharedFolder {
       throw new Error('Path is not in shared folder: ' + path)
     }
 
-    if (this.ids.get(path) !== undefined) {
-      throw new Error('Path already exists: ' + path)
-    }
-
-    const guid = randomUUID()
+    const guid = this.ids.get(path) || randomUUID()
     this.docs.set(guid,new SharedDoc(path, guid))
     this.ids.set(path, guid)
     console.log('Created ydoc', path), guid
-    return this.docs.get(path)
+    return this.docs.get(guid)
   }
 
   destroy()
@@ -131,8 +129,6 @@ editorBinding(path: string, userColor?: {color: string, light: string}): Extensi
     if (userColor === undefined) {
       userColor = usercolors[random.uint32() % usercolors.length]
     }
-
-    this.provider.awareness = new Awareness(this.ydoc)
 
     console.log('document loaded: ', path)
     const yText = this.ydoc.getText('contents')
@@ -199,8 +195,8 @@ export default class Multiplayer extends Plugin {
               try {
                 const sharedDoc = sharedFolder.getDoc(file.path)
                 const binding = sharedDoc.editorBinding(file.path)
+                // @ts-expect-error, not typed
                 app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(binding)
-                //sharedDoc.ydoc.getText('contents').insert(0, "is this thing on?")
                 app.workspace.updateOptions()
                 const text = sharedDoc.ydoc.getText('contents').toString()
                 this.editor.setValue(text) 
@@ -246,6 +242,7 @@ export default class Multiplayer extends Plugin {
 
   // this makes me queasy, but it works
   static getSharedFolder(path: string) : SharedFolder {
+    // @ts-expect-error, not typed
     return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
   }
 
@@ -327,11 +324,13 @@ class SharedFolderModal extends Modal {
 
           form.onsubmit = async (e) => {
             e.preventDefault();
+            // @ts-expect-error, not typed
             const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
             const signalingServers = servers.split(',');
 
             const sharedFolders = this.plugin.settings.sharedFolders
 
+            // @ts-expect-error, not typed
             const password = form.querySelector('input[name="password"]').value;
             const path = this.folder.path
             const settings = {guid: randomUUID(), path: path, signalingServers, password}
