@@ -1,3 +1,5 @@
+'use strict';
+
 import {
   App,
   Modal,
@@ -6,54 +8,34 @@ import {
   Setting,
   TFile,
   TFolder,
-  MarkdownView,
-  Workspace,
+  MarkdownView
 } from "obsidian";
 
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 
 import { yCollab } from 'y-codemirror.next'
-import { EditorState, StateField, Extension} from '@codemirror/state'
+import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { around } from "monkey-around"
 import * as random from 'lib0/random'
-import { createHash } from 'crypto'
+import { Awareness } from "y-protocols/awareness";
+import { randomUUID } from "crypto";
 
 interface MultiplayerSettings {
-  rooms: RoomSettings[];
+  sharedFolders: SharedFolderSettings[];
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
-  rooms: [],
+  sharedFolders: [],
 };
 
-const LEVELDB_PERSISTENCE_NAME = 'multiplayer.db';
 const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com, wss://y-webrtc-signaling-us.herokuapp.com'
-interface RoomSettings {
-  name: string
+interface SharedFolderSettings {
+  guid: string
   path: string 
   signalingServers?: string[]
   password?: string
-}
-
-class Room {
-  provider: WebrtcProvider;
-  persistence: IndexeddbPersistence
-  doc: Y.Doc
-  path: string
-  name: string
-
-  constructor({name, path, signalingServers, password}: RoomSettings) {
-    this.doc = new Y.Doc()
-    this.persistence = new IndexeddbPersistence(name, this.doc)
-    this.provider = new WebrtcProvider(name, this.doc, {
-      signaling: signalingServers || DEFAULT_SIGNALING_SERVERS.split(','),
-      password: password
-    });
-    this.path = path
-    this.name = name
-  }
 }
 
 export const usercolors = [
@@ -67,17 +49,125 @@ export const usercolors = [
   { color: '#1be7ff', light: '#1be7ff33' }
 ]
 
+class SharedFolder {
+  guid: string
+  root: Y.Doc
+  basePath: string
+  ids: Y.Map<string> // Maps document paths to guids
+  docs: Map<string, SharedDoc> // Maps guids to SharedDocs
+  persistence: IndexeddbPersistence
+  provider: WebrtcProvider
+
+  constructor({guid, path, signalingServers, password}: SharedFolderSettings) {
+    this.basePath = path
+    this.guid = guid
+    this.root = new Y.Doc()
+    this.ids = this.root.getMap("docs")
+    this.docs = new Map()
+    this.persistence = new IndexeddbPersistence(guid, this.root)
+    this.provider = new WebrtcProvider(guid, this.root)
+  }
+
+  // Get the shared doc for a file
+  getDoc(path: string, create: boolean = true): SharedDoc {
+    if (!path.startsWith(this.basePath)) {
+      throw new Error('Path is not in shared folder: ' + path)
+    }
+    const id = this.ids.get(path)
+    if (id !== undefined) {
+      const doc = this.docs.get(id)
+      if (doc !== undefined) {
+        return doc
+      } 
+    }
+    if (create) // Possible for id to be found but SharedDoc to be missing
+      return this.createDoc(path)
+    else
+      throw new Error('No shared doc for path: ' + path)
+  }
+
+  // Create a new shared doc
+  createDoc(path: string): SharedDoc {
+    if (!path.startsWith(this.basePath)) {
+      throw new Error('Path is not in shared folder: ' + path)
+    }
+
+    if (this.ids.get(path) !== undefined) {
+      throw new Error('Path already exists: ' + path)
+    }
+
+    const guid = randomUUID()
+    this.docs.set(guid,new SharedDoc(path, guid))
+    this.ids.set(path, guid)
+    console.log('Created ydoc', path), guid
+    return this.docs.get(path)
+  }
+
+  destroy()
+  {
+    this.docs.forEach(doc => doc.destroy())
+  }
+
+}
+
+class SharedDoc {
+  guid: string
+  provider: WebrtcProvider;
+  persistence: IndexeddbPersistence
+  ydoc: Y.Doc
+  path: string
+
+  constructor(path: string, guid: string) {
+    console.log('Creating shared doc', path, guid)
+    this.ydoc = new Y.Doc()
+    this.persistence = new IndexeddbPersistence(guid, this.ydoc)
+    this.provider = new WebrtcProvider(guid, this.ydoc)
+    this.path = path
+    this.guid = guid
+  }
+
+
+editorBinding(path: string, userColor?: {color: string, light: string}): Extension {
+    if (userColor === undefined) {
+      userColor = usercolors[random.uint32() % usercolors.length]
+    }
+
+    this.provider.awareness = new Awareness(this.ydoc)
+
+    console.log('document loaded: ', path)
+    const yText = this.ydoc.getText('contents')
+    const undoManager = new Y.UndoManager(yText)
+
+    this.provider.awareness.setLocalStateField('user', {
+      name: 'Anonymous ' + Math.floor(Math.random() * 100),
+      color: userColor.color,
+      colorLight: userColor.light
+    })
+
+    return yCollab(yText, this.provider.awareness, { undoManager })
+
+  }
+
+  destroy() {
+    if (this.provider) {
+      this.provider.destroy()
+    }
+    if (this.persistence) {
+      this.persistence.destroy()
+    }
+  }
+
+}
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
-  persistence: IndexeddbPersistence
-  rooms: Room[];
+  sharedFolders: SharedFolder[];
+  extensions: Map<string, Extension>;
 
   async onload() {
-    console.log("loading plugin");
+    console.log("loading multiplayer");
     // select a random color for this user
-    const userColor = usercolors[random.uint32() % usercolors.length]
     await this.loadSettings();
-    this.rooms = [ ]
+    this.sharedFolders = [ ]
 
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
@@ -85,9 +175,9 @@ export default class Multiplayer extends Plugin {
         if (file instanceof TFolder) {
           menu.addItem((item) => {
             item
-              .setTitle('New Multiplayer Room')
+              .setTitle('New Multiplayer SharedFolder')
               .setIcon('dot-network')
-              .onClick(() => new RoomModal(this.app, this, file).open());
+              .onClick(() => new SharedFolderModal(this.app, this, file).open());
           });
         }
       })
@@ -95,59 +185,54 @@ export default class Multiplayer extends Plugin {
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
-    this.settings.rooms.forEach(async (room: RoomSettings) => {
-      this.rooms.push(new Room(room))
+    this.settings.sharedFolders.forEach((sharedFolder: SharedFolderSettings) => {
+      const newSharedFolder = new SharedFolder(sharedFolder)
+      this.sharedFolders.push(newSharedFolder)
     })
-    
+     
     const patchOnLoadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onLoadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
-          const cm = this.editor.cm;
-          if (cm) {
-            cm.state.fileName = file.path;
+            const sharedFolder = Multiplayer.getSharedFolder(file.path) 
+            if (sharedFolder) {
+              try {
+                const sharedDoc = sharedFolder.getDoc(file.path)
+                const binding = sharedDoc.editorBinding(file.path)
+                app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(binding)
+                //sharedDoc.ydoc.getText('contents').insert(0, "is this thing on?")
+                app.workspace.updateOptions()
+                const text = sharedDoc.ydoc.getText('contents').toString()
+                this.editor.setValue(text) 
 
-            const room = Multiplayer.getRoom(cm.state.fileName) 
-            if (room) {
-              const fileName = cm.state.fileName.toLowerCase()
-              const yText = room.doc.getText(fileName)
-              const undoManager = new Y.UndoManager(yText)
-
-              room.provider.awareness.setLocalStateField('user', {
-                name: 'Anonymous ' + Math.floor(Math.random() * 100),
-                color: userColor.color,
-                colorLight: userColor.light
-              })
-              cm.state.ybinding = yCollab(yText, room.provider.awareness, { undoManager })
-              app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(cm.state.ybinding)
-              app.workspace.updateOptions()
-
-              console.log("binding yjs")
+                console.log("binding yjs")
+              }
+              catch (e) {
+                console.error(e.message)
+              }
             }
-          }
+           
 
           return old.call(this, file); // now call the orignal function and bind the current scope to it
         }
       }
-    });
-
+    })
+   
     const patchOnUnloadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
-          const cm = this.editor.cm;
-          if (cm) {
-            cm.state.fileName = file.path;
-
-            const room = Multiplayer.getRoom(cm.state.fileName) 
-            if (room) {
-              room.provider.destroy()
-              room.persistence.destroy()
-              console.log("unbinding yjs")
-
+          const sharedFolder = Multiplayer.getSharedFolder(file.path) 
+          if (sharedFolder) {
+            try {
+              const subdoc = sharedFolder.getDoc(file.path)
+              console.log('unbinding yjs')
+              subdoc.destroy()
+            }
+            catch(e) {
+              console.log(e.message)
             }
           }
-
           return old.call(this, file); // now call the orignal function and bind the current scope to it
         }
       }
@@ -160,16 +245,14 @@ export default class Multiplayer extends Plugin {
   }
 
   // this makes me queasy, but it works
-  static getRoom(path: string) : Room {
-    return app.plugins.plugins['obsidian-multiplayer'].rooms.find(room => path.contains(room.path))
+  static getSharedFolder(path: string) : SharedFolder {
+    return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
   }
 
   onunload() {
-    this.rooms.forEach(room => {
-      room.persistence.destroy()
-      room.provider.destroy()
-    })
-        console.log("unloading plugin");
+    this.sharedFolders.forEach(sharedFolder => { sharedFolder.destroy() })
+    console.log("unloading plugin");
+    this.saveSettings()
   }
 
   async loadSettings() {
@@ -179,7 +262,7 @@ export default class Multiplayer extends Plugin {
     await this.saveData(this.settings);
   }
 }
-class RoomModal extends Modal {
+class SharedFolderModal extends Modal {
   plugin: Multiplayer;
   folder: TFolder;
 
@@ -193,38 +276,24 @@ class RoomModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('modal-style-multiplayer');
     contentEl.empty();
-    const room = this.plugin.rooms.find(room => this.folder.path.contains(room.path))
-    if (room) {
-      contentEl.createEl("h2", { text: "Room already exists" });
-      contentEl.createEl('p', { text: 'This folder is already a multiplayer room.'})
-      contentEl.createEl('p', { text: 'If you want to change the settings, please delete the room first.'})
-      const button = contentEl.createEl('button', { text: 'Delete Room', attr: { class: 'btn btn-danger' } })
+    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.path.contains(sharedFolder.basePath))
+    if (sharedFolder) {
+      contentEl.createEl("h2", { text: "SharedFolder already exists" });
+      contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'})
+      contentEl.createEl('p', { text: 'If you want to change the settings, please delete the sharedFolder first.'})
+      const button = contentEl.createEl('button', { text: 'Delete SharedFolder', attr: { class: 'btn btn-danger' } })
       button.onClickEvent((ev) => {
-        this.plugin.settings.rooms = this.plugin.settings.rooms.filter(el => el.path !== room.path)
+        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
         this.plugin.saveSettings()
         this.close()
       })
     } else {
-      contentEl.createEl("h2", { text: "Create a new room" });
+      contentEl.createEl("h2", { text: "Create a new sharedFolder" });
       contentEl.createEl("form", "form-multiplayer",
       (form) => {
 
           form.createEl("label", {
-            attr: { for: "room-name" },
-            text: "Room name"
-          })
-
-          form.createEl("input", {
-            type: "text",
-            attr: {
-              name: "name",
-              id: "room-name"
-            },
-            placeholder: "Room name",
-          });
-          
-          form.createEl("label", {
-            attr: { for: "room-password" },
+            attr: { for: "sharedFolder-password" },
             text: "Optional password"
           })
 
@@ -232,13 +301,13 @@ class RoomModal extends Modal {
             type: "password",
             attr: {
               name: "password",
-              id: "room-password"
+              id: "sharedFolder-password"
             },
-            placeholder: "Room password",
+            placeholder: "SharedFolder password",
           });
 
           form.createEl("label", {
-            attr: { for: "room-servers" },
+            attr: { for: "sharedFolder-servers" },
             text: "Optional signaling servers"
           })
 
@@ -246,7 +315,7 @@ class RoomModal extends Modal {
             type: "text",
             attr: {
               name: "servers",
-              id: "room-servers"
+              id: "sharedFolder-servers"
             },
             placeholder: "wss://signaling.yjs.dev",
           });
@@ -258,22 +327,17 @@ class RoomModal extends Modal {
 
           form.onsubmit = async (e) => {
             e.preventDefault();
-            const name = form.querySelector('input[name="name"]').value;
             const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
             const signalingServers = servers.split(',');
 
-            const rooms = this.plugin.settings.rooms
-            if (rooms.find(room => room.name === name)) {
-              alert('A room with this name already exists.')
-              return
-            }
+            const sharedFolders = this.plugin.settings.sharedFolders
 
             const password = form.querySelector('input[name="password"]').value;
             const path = this.folder.path
-            this.plugin.settings.rooms.push({name, path, signalingServers, password})
+            const settings = {guid: randomUUID(), path: path, signalingServers, password}
+            this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
-            this.plugin.rooms.push(new Room({name, path, signalingServers, password}))
-          
+            this.plugin.sharedFolders.push(new SharedFolder(settings))
 
             this.close();
           }
