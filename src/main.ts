@@ -8,19 +8,15 @@ import {
   Setting,
   TFile,
   TFolder,
-  MarkdownView
+  MarkdownView,
+  Editor
 } from "obsidian";
 
-import * as Y from 'yjs'
-import { WebrtcProvider } from 'y-webrtc'
+import { SharedDoc, SharedFolder, SharedFolderSettings } from './sharedTypes'
 
-import { yCollab } from 'y-codemirror.next'
 import { Extension} from '@codemirror/state'
 import { EditorView } from "@codemirror/view";
-import { IndexeddbPersistence } from 'y-indexeddb'
 import { around } from "monkey-around"
-import * as random from 'lib0/random'
-import { Awareness } from "y-protocols/awareness";
 import { randomUUID } from "crypto";
 
 interface MultiplayerSettings {
@@ -31,139 +27,17 @@ const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
 };
 
-const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com, wss://y-webrtc-signaling-us.herokuapp.com'
-interface SharedFolderSettings {
-  guid: string
-  path: string 
-  signalingServers?: string[]
-  password?: string
-}
-
-export const usercolors = [
-  { color: '#30bced', light: '#30bced33' },
-  { color: '#6eeb83', light: '#6eeb8333' },
-  { color: '#ffbc42', light: '#ffbc4233' },
-  { color: '#ecd444', light: '#ecd44433' },
-  { color: '#ee6352', light: '#ee635233' },
-  { color: '#9ac2c9', light: '#9ac2c933' },
-  { color: '#8acb88', light: '#8acb8833' },
-  { color: '#1be7ff', light: '#1be7ff33' }
-]
-
-class SharedFolder {
-  guid: string
-  root: Y.Doc
-  basePath: string
-  ids: Y.Map<string> // Maps document paths to guids
-  docs: Map<string, SharedDoc> // Maps guids to SharedDocs
-  persistence: IndexeddbPersistence
-  provider: WebrtcProvider
-
-  constructor({guid, path, signalingServers, password}: SharedFolderSettings) {
-    this.basePath = path
-    this.guid = guid
-    this.root = new Y.Doc()
-    this.ids = this.root.getMap("docs")
-    this.docs = new Map()
-    this.persistence = new IndexeddbPersistence(guid, this.root)
-    this.provider = new WebrtcProvider(guid, this.root)
-  }
-
-  // Get the shared doc for a file
-  getDoc(path: string, create: boolean = true): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
-      throw new Error('Path is not in shared folder: ' + path)
-    }
-    const id = this.ids.get(path)
-    if (id !== undefined) {
-      const doc = this.docs.get(id)
-      if (doc !== undefined) {
-        return doc
-      } 
-    } 
-
-    if (create) 
-      return this.createDoc(path)
-    else
-      throw new Error('No shared doc for path: ' + path)
-  }
-
-  // Create a new shared doc
-  createDoc(path: string): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
-      throw new Error('Path is not in shared folder: ' + path)
-    }
-
-    const guid = this.ids.get(path) || randomUUID()
-    this.docs.set(guid,new SharedDoc(path, guid))
-    this.ids.set(path, guid)
-    console.log('Created ydoc', path), guid
-    return this.docs.get(guid)
-  }
-
-  destroy()
-  {
-    this.docs.forEach(doc => doc.destroy())
-  }
-
-}
-
-class SharedDoc {
-  guid: string
-  provider: WebrtcProvider;
-  persistence: IndexeddbPersistence
-  ydoc: Y.Doc
-  path: string
-
-  constructor(path: string, guid: string) {
-    console.log('Creating shared doc', path, guid)
-    this.ydoc = new Y.Doc()
-    this.persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this.provider = new WebrtcProvider(guid, this.ydoc)
-    this.path = path
-    this.guid = guid
-  }
-
-
-editorBinding(path: string, userColor?: {color: string, light: string}): Extension {
-    if (userColor === undefined) {
-      userColor = usercolors[random.uint32() % usercolors.length]
-    }
-
-    console.log('document loaded: ', path)
-    const yText = this.ydoc.getText('contents')
-    const undoManager = new Y.UndoManager(yText)
-
-    this.provider.awareness.setLocalStateField('user', {
-      name: 'Anonymous ' + Math.floor(Math.random() * 100),
-      color: userColor.color,
-      colorLight: userColor.light
-    })
-
-    return yCollab(yText, this.provider.awareness, { undoManager })
-
-  }
-
-  destroy() {
-    if (this.provider) {
-      this.provider.destroy()
-    }
-    if (this.persistence) {
-      this.persistence.destroy()
-    }
-  }
-
-}
+const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com'
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
   sharedFolders: SharedFolder[];
-  extensions: Map<string, Extension>;
+  private _extensions: Extension[];
 
   async onload() {
     console.log("loading multiplayer");
-    // select a random color for this user
     await this.loadSettings();
     this.sharedFolders = [ ]
+    this._extensions = []
 
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
@@ -185,35 +59,39 @@ export default class Multiplayer extends Plugin {
       const newSharedFolder = new SharedFolder(sharedFolder)
       this.sharedFolders.push(newSharedFolder)
     })
-     
-    const patchOnLoadFile = around(MarkdownView.prototype, {
-      // replace MarkdownView.onLoadFile() with the following function
-      onLoadFile(old) { // old is the original onLoadFile function
-        return function (file) { // onLoadFile takes one argument, file
-            const sharedFolder = Multiplayer.getSharedFolder(file.path) 
+   
+    var extensions = this._extensions
+    this.app.workspace.on("file-open", file => {
+    //const patchOnLoadFile = around(MarkdownView.prototype, {
+      //onLoadFile(old) {
+       // return function (file) {
+        //  let ret = old.call(this, file)
+          if (file) {
+            const sharedFolder = Multiplayer.getSharedFolder(file.path)
             if (sharedFolder) {
               try {
                 const sharedDoc = sharedFolder.getDoc(file.path)
-                const binding = sharedDoc.editorBinding(file.path)
-                // @ts-expect-error, not typed
-                app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(binding)
+                sharedDoc.connect()
+                extensions.push(sharedDoc.binding)
+                const view = this.app.workspace.getActiveViewOfType(MarkdownView)
+                if (view) {
+                  view.editor.setValue(sharedDoc.text)
+                }
+                //@ts-expect-error
+                app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
                 app.workspace.updateOptions()
-                const text = sharedDoc.ydoc.getText('contents').toString()
-                this.editor.setValue(text) 
-
                 console.log("binding yjs")
               }
               catch (e) {
                 console.error(e.message)
               }
             }
-           
-
-          return old.call(this, file); // now call the orignal function and bind the current scope to it
-        }
-      }
+          }
+          //return ret
+       // }
+      //}
     })
-   
+
     const patchOnUnloadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
@@ -222,8 +100,10 @@ export default class Multiplayer extends Plugin {
           if (sharedFolder) {
             try {
               const subdoc = sharedFolder.getDoc(file.path)
-              console.log('unbinding yjs')
-              subdoc.destroy()
+              console.log('disconnecting room', subdoc.path)
+              subdoc.close()
+              extensions.length = 0
+              this.app.workspace.updateOptions()
             }
             catch(e) {
               console.log(e.message)
@@ -235,7 +115,7 @@ export default class Multiplayer extends Plugin {
     });
 
     // register the patches with Obsidian's register method so that it gets unloaded properly
-    this.register(patchOnLoadFile);
+    //this.register(patchOnLoadFile);
     this.register(patchOnUnloadFile);
   
   }
