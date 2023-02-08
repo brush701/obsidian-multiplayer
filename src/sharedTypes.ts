@@ -60,23 +60,23 @@ const usercolors = [
       const doc = this.docs.get(id)
       if (doc !== undefined) {
         return doc
-      } 
-    } 
-
-    if (create) 
+      } else {
+        return this.createDoc(path, true)
+      }
+    } else if (create) 
       return this.createDoc(path)
     else
       throw new Error('No shared doc for path: ' + path)
   }
 
   // Create a new shared doc
-  createDoc(path: string): SharedDoc {
+  createDoc(path: string, loadFromDisk:boolean = false): SharedDoc {
     if (!path.startsWith(this.basePath)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
 
     var contents = ""
-    if (existsSync(this._vaultRoot+path)) {
+    if (loadFromDisk && existsSync(this._vaultRoot+path)) {
       contents = readFileSync(path, "utf-8")
     }
 
