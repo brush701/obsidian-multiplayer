@@ -8,6 +8,7 @@ import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
+import { existsSync, readFileSync} from "fs"
 
 
 export interface SharedFolderSettings {
@@ -36,8 +37,10 @@ const usercolors = [
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
   private _persistence: IndexeddbPersistence
   private _provider: WebrtcProvider
+  private _vaultRoot:string
 
-  constructor({guid, path, signalingServers, password}: SharedFolderSettings) {
+  constructor({guid, path, signalingServers, password}: SharedFolderSettings, vaultRoot: string) {
+    this._vaultRoot = vaultRoot + "/"
     this.basePath = path
     this.guid = guid
     this.root = new Y.Doc()
@@ -57,23 +60,29 @@ const usercolors = [
       const doc = this.docs.get(id)
       if (doc !== undefined) {
         return doc
-      } 
-    } 
-
-    if (create) 
+      } else {
+        return this.createDoc(path, true)
+      }
+    } else if (create) 
       return this.createDoc(path)
     else
       throw new Error('No shared doc for path: ' + path)
   }
 
   // Create a new shared doc
-  createDoc(path: string): SharedDoc {
+  createDoc(path: string, loadFromDisk:boolean = false): SharedDoc {
     if (!path.startsWith(this.basePath)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
 
+    var contents = ""
+    if (loadFromDisk && existsSync(this._vaultRoot+path)) {
+      contents = readFileSync(path, "utf-8")
+    }
+
     const guid = this.ids.get(path) || randomUUID()
     const doc = new SharedDoc(path, guid)
+    doc.ydoc.getText("contents").insert(0, contents)
     this.docs.set(guid, doc)
     this.ids.set(path, guid)
     
