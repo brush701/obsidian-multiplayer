@@ -77,7 +77,8 @@ export default class Multiplayer extends Plugin {
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedFolderSettings) => {
-      const newSharedFolder = new SharedFolder(sharedFolder)
+      //@ts-expect-error
+      const newSharedFolder = new SharedFolder(sharedFolder, this.app.vault.adapter.getbasePath())
       this.sharedFolders.push(newSharedFolder)
     })
    
@@ -277,7 +278,8 @@ class SharedFolderModal extends Modal {
             const settings = {guid: randomUUID(), path: path, signalingServers, password}
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
-            this.plugin.sharedFolders.push(new SharedFolder(settings))
+            //@ts-expect-error
+            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getBasePath()))
             this.plugin.addIcons()
             this.close();
           }
@@ -312,6 +314,7 @@ class UnshareFolderModal extends Modal {
       const button = contentEl.createEl('button', { text: 'Unshare Folder', attr: { class: 'btn btn-danger' } })
       button.onClickEvent((ev) => {
         this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
+        this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.basePath !== sharedFolder.basePath)
         this.plugin.saveSettings()
         this.plugin.removeIcon(this.folder.basePath)
         this.folder.docs.forEach(doc => {
