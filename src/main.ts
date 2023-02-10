@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
 };
 
+const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
+
 const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com'
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
@@ -45,7 +47,7 @@ export default class Multiplayer extends Plugin {
         if (file instanceof TFolder) {
           menu.addItem((item) => {
             item
-              .setTitle('New Multiplayer SharedFolder')
+              .setTitle('New Multiplayer Shared Folder')
               .setIcon('dot-network')
               .onClick(() => new SharedFolderModal(this.app, this, file).open());
           });
@@ -53,10 +55,30 @@ export default class Multiplayer extends Plugin {
       })
     );
 
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file: TFile) => {
+        // Add a menu item to the folder context menu to create a board
+        if (file instanceof TFolder) {
+          this.sharedFolders.some(folder => {
+            if (file.path.contains(folder.basePath)) {
+              menu.addItem((item) => {
+                item
+                  .setTitle('Delete Multiplayer Shared Folder')
+                  .setIcon('dot-network')
+                  .onClick(() => new UnshareFolderModal(this.app, this, folder).open());
+              })
+              return true
+            }
+          })
+        }
+      })
+    )
+
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedFolderSettings) => {
-      const newSharedFolder = new SharedFolder(sharedFolder)
+      //@ts-expect-error
+      const newSharedFolder = new SharedFolder(sharedFolder, this.app.vault.adapter.getbasePath())
       this.sharedFolders.push(newSharedFolder)
     })
    
@@ -84,7 +106,7 @@ export default class Multiplayer extends Plugin {
         }
       }
     })
-
+    
     const patchOnUnloadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
@@ -108,12 +130,62 @@ export default class Multiplayer extends Plugin {
     });
 
     // register the patches with Obsidian's register method so that it gets unloaded properly
-    //this.register(patchOnLoadFile);
     this.register(patchOnUnloadFile);
   
+    this.app.workspace.onLayoutReady(() => this.addIcons());
+    this.registerEvent(this.app.workspace.on('layout-change', () => this.addIcons()));
   }
 
-  // this makes me queasy, but it works
+  addIcons() {
+    const fileExplorers = this.app.workspace.getLeavesOfType('file-explorer')
+    fileExplorers.forEach(fileExplorer => {
+      this.sharedFolders.forEach(folder => {
+        //@ts-expect-error
+        const fileItem = fileExplorer.view.fileItems[folder.basePath];
+        if (fileItem) {
+          const titleEl = fileItem.titleEl;
+          const titleInnerEl = fileItem.titleInnerEl;
+
+          // needs to check because of the refreshing the plugin will duplicate all the icons
+          if (titleEl.children.length === 2 || titleEl.children.length === 1) {
+            //const iconName = typeof value === 'string' ? value : value.iconName;
+            //if (iconName) {
+              const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
+              if (existingIcon) {
+                existingIcon.remove();
+              }
+
+              const iconNode = titleEl.createDiv();
+              iconNode.classList.add('obsidian-icon-multiplayer');
+
+              iconNode.innerHTML = icon 
+
+              titleEl.insertBefore(iconNode, titleInnerEl);
+            //}
+            }
+          }
+        })
+      })
+  }
+
+  removeIcon(path: string) {
+    const fileExplorers = this.app.workspace.getLeavesOfType('file-explorer')
+    fileExplorers.forEach(fileExplorer => {
+      //@ts-expect-error
+      const fileItem = fileExplorer.view.fileItems[path];
+      if (fileItem) {
+        const titleEl = fileItem.titleEl;
+        const titleInnerEl = fileItem.titleInnerEl;
+
+
+        const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
+        if (existingIcon) {
+          existingIcon.remove();
+        }
+      }
+    })
+  }
+
   static getSharedFolder(path: string) : SharedFolder {
     // @ts-expect-error, not typed
     return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
@@ -150,11 +222,8 @@ class SharedFolderModal extends Modal {
     if (sharedFolder) {
       contentEl.createEl("h2", { text: "SharedFolder already exists" });
       contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'})
-      contentEl.createEl('p', { text: 'If you want to change the settings, please delete the sharedFolder first.'})
-      const button = contentEl.createEl('button', { text: 'Delete SharedFolder', attr: { class: 'btn btn-danger' } })
+      const button = contentEl.createEl('button', { text: 'OK', attr: { class: 'btn btn-ok' } })
       button.onClickEvent((ev) => {
-        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
-        this.plugin.saveSettings()
         this.close()
       })
     } else {
@@ -209,12 +278,53 @@ class SharedFolderModal extends Modal {
             const settings = {guid: randomUUID(), path: path, signalingServers, password}
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
-            this.plugin.sharedFolders.push(new SharedFolder(settings))
-
+            //@ts-expect-error
+            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getBasePath()))
+            this.plugin.addIcons()
             this.close();
           }
         })
       }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+class UnshareFolderModal extends Modal {
+  plugin: Multiplayer;
+  folder: SharedFolder;
+
+  constructor(app: App, plugin: Multiplayer, folder: SharedFolder) {
+    super(app);
+    this.plugin = plugin;
+    this.folder = folder;
+  }
+
+  onOpen() {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass('modal-style-multiplayer');
+    contentEl.empty();
+    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.basePath == sharedFolder.basePath)
+    if (sharedFolder) {
+      contentEl.createEl("h2", { text: "Unshare Folder" });
+      contentEl.createEl('p', { text: 'Do you want to unshare this folder?'})
+      const button = contentEl.createEl('button', { text: 'Unshare Folder', attr: { class: 'btn btn-danger' } })
+      button.onClickEvent((ev) => {
+        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
+        this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.basePath !== sharedFolder.basePath)
+        this.plugin.saveSettings()
+        this.plugin.removeIcon(this.folder.basePath)
+        this.folder.docs.forEach(doc => {
+          doc.close()
+          doc.destroy()
+        })
+        this.folder.destroy()
+        this.close()
+      })
+    } 
   }
 
   onClose() {

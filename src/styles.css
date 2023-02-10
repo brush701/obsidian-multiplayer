@@ -21,4 +21,12 @@
     padding-right: 2px;
     z-index: 3;
   }
+
+  .obsidian-icon-multiplayer {
+    border: 1px solid transparent;
+    margin: 0px 4px 0px 0px;
+    display: flex;
+    align-self: center;
+    margin: auto 0;
+  }
   
