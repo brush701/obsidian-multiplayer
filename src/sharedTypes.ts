@@ -48,6 +48,14 @@ const usercolors = [
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(guid, this.root)
     this._provider = new WebrtcProvider(guid, this.root)
+    this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
+      let map = doc.getMap<string>("docs")
+      map.forEach((path, guid) => {
+        if (!fs.existsSync(path)) {
+          fs.open(path,"w", () => {}) //create the file
+        }
+      })
+    })
   }
 
   // Get the shared doc for a file
