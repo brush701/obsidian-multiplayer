@@ -62,34 +62,27 @@ export default class Multiplayer extends Plugin {
    
     var extensions = this._extensions
     this.app.workspace.on("file-open", file => {
-    //const patchOnLoadFile = around(MarkdownView.prototype, {
-      //onLoadFile(old) {
-       // return function (file) {
-        //  let ret = old.call(this, file)
-          if (file) {
-            const sharedFolder = Multiplayer.getSharedFolder(file.path)
-            if (sharedFolder) {
-              try {
-                const sharedDoc = sharedFolder.getDoc(file.path)
-                sharedDoc.connect()
-                extensions.push(sharedDoc.binding)
-                const view = this.app.workspace.getActiveViewOfType(MarkdownView)
-                if (view) {
-                  view.editor.setValue(sharedDoc.text)
-                }
-                //@ts-expect-error
-                app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
-                app.workspace.updateOptions()
-                console.log("binding yjs")
-              }
-              catch (e) {
-                console.error(e.message)
-              }
+      if (file) {
+        const sharedFolder = Multiplayer.getSharedFolder(file.path)
+        if (sharedFolder) {
+          try {
+            const sharedDoc = sharedFolder.getDoc(file.path)
+            sharedDoc.connect()
+            extensions.push(sharedDoc.binding)
+            const view = this.app.workspace.getActiveViewOfType(MarkdownView)
+            if (view) {
+              view.editor.setValue(sharedDoc.text)
             }
+            //@ts-expect-error
+            app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
+            app.workspace.updateOptions()
+            console.log("binding yjs")
           }
-          //return ret
-       // }
-      //}
+          catch (e) {
+            console.error(e.message)
+          }
+        }
+      }
     })
 
     const patchOnUnloadFile = around(MarkdownView.prototype, {
