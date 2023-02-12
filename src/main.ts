@@ -9,16 +9,17 @@ import {
   TFile,
   TFolder,
   MarkdownView,
-  Editor
+  FileSystemAdapter,
+  ButtonComponent,
+  Notice
 } from "obsidian";
 
 import { SharedDoc, SharedFolder, SharedFolderSettings } from './sharedTypes'
 
 import { Extension} from '@codemirror/state'
-import { EditorView } from "@codemirror/view";
 import { around } from "monkey-around"
 import { randomUUID } from "crypto";
-
+import * as util from './util'
 interface MultiplayerSettings {
   sharedFolders: SharedFolderSettings[];
 }
@@ -51,14 +52,7 @@ export default class Multiplayer extends Plugin {
               .setIcon('dot-network')
               .onClick(() => new SharedFolderModal(this.app, this, file).open());
           });
-        }
-      })
-    );
 
-    this.registerEvent(
-      this.app.workspace.on('file-menu', (menu, file: TFile) => {
-        // Add a menu item to the folder context menu to create a board
-        if (file instanceof TFolder) {
           this.sharedFolders.some(folder => {
             if (file.path.contains(folder.basePath)) {
               menu.addItem((item) => {
@@ -67,18 +61,25 @@ export default class Multiplayer extends Plugin {
                   .setIcon('dot-network')
                   .onClick(() => new UnshareFolderModal(this.app, this, folder).open());
               })
+
+              menu.addItem((item) => {
+                item
+                  .setTitle('Copy GUID')
+                  .onClick(() => navigator.clipboard.writeText(folder.guid).then(() => {
+                    new Notice("Copied GUID")
+                  }))
+              })
               return true
             }
           })
         }
       })
-    )
+    );
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedFolderSettings) => {
-      //@ts-expect-error
-      const newSharedFolder = new SharedFolder(sharedFolder, this.app.vault.adapter.getbasePath())
+      const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath())
       this.sharedFolders.push(newSharedFolder)
     })
    
@@ -87,21 +88,17 @@ export default class Multiplayer extends Plugin {
       if (file) {
         const sharedFolder = Multiplayer.getSharedFolder(file.path)
         if (sharedFolder) {
-          try {
-            const sharedDoc = sharedFolder.getDoc(file.path)
-            sharedDoc.connect()
+          const sharedDoc = sharedFolder.getDoc(file.path)
+          sharedDoc.connect()
+          const view = this.app.workspace.getActiveViewOfType(MarkdownView)
+          if (view) {
             extensions.push(sharedDoc.binding)
-            const view = this.app.workspace.getActiveViewOfType(MarkdownView)
-            if (view) {
-              view.editor.setValue(sharedDoc.text)
-            }
-            //@ts-expect-error
-            app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
-            app.workspace.updateOptions()
-            console.log("binding yjs")
-          }
-          catch (e) {
-            console.error(e.message)
+            sharedDoc.onceSynced().then(() => {
+              //@ts-expect-error
+              app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
+              app.workspace.updateOptions()
+              console.log("binding yjs")
+            })
           }
         }
       }
@@ -148,8 +145,6 @@ export default class Multiplayer extends Plugin {
 
           // needs to check because of the refreshing the plugin will duplicate all the icons
           if (titleEl.children.length === 2 || titleEl.children.length === 1) {
-            //const iconName = typeof value === 'string' ? value : value.iconName;
-            //if (iconName) {
               const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
               if (existingIcon) {
                 existingIcon.remove();
@@ -161,7 +156,6 @@ export default class Multiplayer extends Plugin {
               iconNode.innerHTML = icon 
 
               titleEl.insertBefore(iconNode, titleInnerEl);
-            //}
             }
           }
         })
@@ -190,6 +184,8 @@ export default class Multiplayer extends Plugin {
     // @ts-expect-error, not typed
     return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
   }
+
+  
 
   onunload() {
     this.sharedFolders.forEach(sharedFolder => { sharedFolder.destroy() })
@@ -229,11 +225,26 @@ class SharedFolderModal extends Modal {
     } else {
       contentEl.createEl("h2", { text: "Create a new sharedFolder" });
       contentEl.createEl("form", "form-multiplayer",
-      (form) => {
+        (form) => {
+          form.createEl("label", {
+            attr: { for: "sharedFolder-guid" },
+            text: "Optional GUID: "
+          })
+
+          form.createEl("input", {
+            type: "text",
+            attr: {
+              name: "guid",
+              id: "sharedFolder-guid"
+            },
+            placeholder: "SharedFolder password",
+          });
+
+          form.createEl("br")
 
           form.createEl("label", {
             attr: { for: "sharedFolder-password" },
-            text: "Optional password"
+            text: "Optional password: "
           })
 
           form.createEl("input", {
@@ -244,10 +255,11 @@ class SharedFolderModal extends Modal {
             },
             placeholder: "SharedFolder password",
           });
+          form.createEl("br")
 
           form.createEl("label", {
             attr: { for: "sharedFolder-servers" },
-            text: "Optional signaling servers"
+            text: "Optional signaling servers: "
           })
 
           form.createEl("input", {
@@ -259,13 +271,17 @@ class SharedFolderModal extends Modal {
             placeholder: "wss://signaling.yjs.dev",
           });
 
+          form.createEl("br")
+
           form.createEl("button", {
             text: "Create",
             type: "submit",
           });
-
           form.onsubmit = async (e) => {
             e.preventDefault();
+            // @ts-expect-error, not typed
+            const guid = form.querySelector('input[name="guid"]').value || null
+
             // @ts-expect-error, not typed
             const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
             const signalingServers = servers.split(',');
@@ -275,7 +291,7 @@ class SharedFolderModal extends Modal {
             // @ts-expect-error, not typed
             const password = form.querySelector('input[name="password"]').value;
             const path = this.folder.path
-            const settings = {guid: randomUUID(), path: path, signalingServers, password}
+            const settings = { guid: guid || randomUUID(), path: path, signalingServers, password }
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             //@ts-expect-error
@@ -284,7 +300,7 @@ class SharedFolderModal extends Modal {
             this.close();
           }
         })
-      }
+    }
   }
 
   onClose() {
@@ -342,14 +358,18 @@ class MultiplayerSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Settings for my awesome plugin." });
+    containerEl.createEl("h2", { text: "Multiplayer" });
     new Setting(containerEl)
-      .setName("Setting #1")
-      .setDesc("It's a secret")
+      .setName("Username")
+      .setDesc("The name that others will see over your caret")
       .addText((text) =>
-        text
-          .setPlaceholder("Enter your secret")
-          .setValue("")
+        text.setValue("")
       );
+
+    new ButtonComponent(containerEl)
+      .setButtonText("Backup Shared Folders")
+      .onClick(e => {
+        util.backup((this.app.vault.adapter as FileSystemAdapter).getBasePath() + "/.obsidian/plugins/obsidian-multiplayer") // For now, backup to the plugin folder
+      })
   }
 }

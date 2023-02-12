@@ -8,7 +8,7 @@ import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
-import { existsSync, readFileSync} from "fs"
+import { existsSync, readFileSync, open} from "fs"
 
 
 export interface SharedFolderSettings {
@@ -51,8 +51,8 @@ const usercolors = [
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
-        if (!fs.existsSync(path)) {
-          fs.open(path,"w", () => {}) //create the file
+        if (existsSync(path)) {
+          open(path,"w", () => {}) //create the file
         }
       })
     })
@@ -69,10 +69,10 @@ const usercolors = [
       if (doc !== undefined) {
         return doc
       } else {
-        return this.createDoc(path, true)
+        return this.createDoc(path)
       }
     } else if (create) 
-      return this.createDoc(path)
+      return this.createDoc(path, true)
     else
       throw new Error('No shared doc for path: ' + path)
   }
@@ -85,12 +85,17 @@ const usercolors = [
 
     var contents = ""
     if (loadFromDisk && existsSync(this._vaultRoot+path)) {
-      contents = readFileSync(path, "utf-8")
+      contents = readFileSync(this._vaultRoot+path, "utf-8")
     }
 
     const guid = this.ids.get(path) || randomUUID()
     const doc = new SharedDoc(path, guid)
-    doc.ydoc.getText("contents").insert(0, contents)
+    const text = doc.ydoc.getText("contents")
+    doc.onceSynced().then( () => {
+      if (contents && text.toString() != contents)
+      text.insert(0, contents)
+    })
+
     this.docs.set(guid, doc)
     this.ids.set(path, guid)
     
@@ -147,6 +152,17 @@ export class SharedDoc {
     this._provider = new WebrtcProvider(guid, this.ydoc)
     this.path = path
     this.guid = guid
+    this.connect()
+  }
+
+  /**
+   * Use this Promise to take action the first time the IndexedDB persistence syncs
+   * @returns {Promise} A Promise resolving once the IndexedDB persitence has synced
+   */
+  onceSynced() {
+    return new Promise((resolve) => {
+      this._persistence.once("synced", resolve)
+    })
   }
 
 

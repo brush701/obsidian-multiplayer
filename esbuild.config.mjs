@@ -48,5 +48,5 @@ esbuild.build({
 	logLevel: "info",
 	sourcemap: prod ? false : 'inline',
 	treeShaking: true,
-	outfile: 'main.js',
+	outdir: 'test/vault/.obsidian/plugins/obsidian-multiplayer',
 }).catch(() => process.exit(1));
