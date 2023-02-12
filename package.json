@@ -5,7 +5,7 @@
 	"main": "src/main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production" 
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
 	},
 	"keywords": [],
 	"author": "Ben Rush",
@@ -25,6 +25,7 @@
 		"y-leveldb": "^0.1.1",
 		"y-protocols": "^1.0.5",
 		"y-webrtc": "^10.2.3",
-		"yjs": "^13.5.43"
+		"yjs": "^13.5.43",
+		"jszip": "^3.10.1"
 	}
 }
