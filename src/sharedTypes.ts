@@ -14,6 +14,7 @@ import { existsSync, readFileSync, open} from "fs"
 export interface SharedFolderSettings {
   guid: string
   path: string 
+  username?: string
   signalingServers?: string[]
   password?: string
 }
@@ -35,14 +36,16 @@ const usercolors = [
   basePath: string
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
+  username: string
   private _persistence: IndexeddbPersistence
   private _provider: WebrtcProvider
   private _vaultRoot:string
 
-  constructor({guid, path, signalingServers, password}: SharedFolderSettings, vaultRoot: string) {
+  constructor({guid, path, username, signalingServers, password}: SharedFolderSettings, vaultRoot: string) {
     this._vaultRoot = vaultRoot + "/"
     this.basePath = path
     this.guid = guid
+    this.username = username || "Anonymous"
     this.root = new Y.Doc()
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
@@ -89,7 +92,7 @@ const usercolors = [
     }
 
     const guid = this.ids.get(path) || randomUUID()
-    const doc = new SharedDoc(path, guid)
+    const doc = new SharedDoc(path, guid, this.username)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
       if (contents && text.toString() != contents)
@@ -127,7 +130,7 @@ export class SharedDoc {
             const undoManager = new Y.UndoManager(yText)
 
             this._provider.awareness.setLocalStateField('user', {
-                name: 'Anonymous ' + Math.floor(Math.random() * 100),
+                name: this.username,
                 color: userColor.color,
                 colorLight: userColor.light
             })
@@ -140,16 +143,18 @@ export class SharedDoc {
   private _persistence: IndexeddbPersistence
   ydoc: Y.Doc
   path: string
+  username: string
 
   public get text(): string {
     return this.ydoc.getText('contents').toString()
   }
 
-  constructor(path: string, guid: string) {
+  constructor(path: string, guid: string, username?: string) {
     console.log('Creating shared doc', path, guid)
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
     this._provider = new WebrtcProvider(guid, this.ydoc)
+    this.username = username || "Anonymous"
     this.path = path
     this.guid = guid
     this.connect()
