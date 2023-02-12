@@ -35,7 +35,6 @@ export function backup(path: string) {
 
                     loadrequest.onsuccess = () => {
                         counter++
-                        console.log(counter, "/", databases.length)
                         var data = loadrequest.result;
                         let bak = JSON.stringify(data)
                         folder.file("updates", bak) // stringify it and put it in the "updates" file
