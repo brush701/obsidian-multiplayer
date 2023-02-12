@@ -13,6 +13,7 @@ import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
   path: string 
+  username?: string
   signalingServers: string[],
   encPw: string
 }
@@ -127,7 +128,7 @@ export class SharedDoc {
             const undoManager = new Y.UndoManager(yText)
 
             this._provider.awareness.setLocalStateField('user', {
-                name: 'Anonymous ' + Math.floor(Math.random() * 100),
+                name: this._parent.plugin.settings.username,
                 color: userColor.color,
                 colorLight: userColor.light
             })
