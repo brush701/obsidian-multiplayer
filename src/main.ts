@@ -2,7 +2,6 @@
 
 import {
   App,
-  Modal,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -14,12 +13,12 @@ import {
   Notice
 } from "obsidian";
 
-import { SharedDoc, SharedFolder, SharedFolderSettings } from './sharedTypes'
+import { SharedFolder, SharedFolderSettings } from './sharedTypes'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
-import { randomUUID } from "crypto";
 import * as util from './util'
+import { SharedFolderModal, UnshareFolderModal } from "./modals";
 interface MultiplayerSettings {
   sharedFolders: SharedFolderSettings[];
 }
@@ -46,14 +45,7 @@ export default class Multiplayer extends Plugin {
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
         // Add a menu item to the folder context menu to create a board
         if (file instanceof TFolder) {
-          menu.addItem((item) => {
-            item
-              .setTitle('New Multiplayer Shared Folder')
-              .setIcon('dot-network')
-              .onClick(() => new SharedFolderModal(this.app, this, file).open());
-          });
-
-          this.sharedFolders.some(folder => {
+          const isShared = this.sharedFolders.some(folder => {
             if (file.path.contains(folder.basePath)) {
               menu.addItem((item) => {
                 item
@@ -65,13 +57,22 @@ export default class Multiplayer extends Plugin {
               menu.addItem((item) => {
                 item
                   .setTitle('Copy GUID')
-                  .onClick(() => navigator.clipboard.writeText(folder.guid).then(() => {
+                  .onClick(() => navigator.clipboard.writeText(folder.settings.guid).then(() => {
                     new Notice("Copied GUID")
                   }))
               })
               return true
             }
           })
+
+          if (!isShared) {
+            menu.addItem((item) => {
+              item
+                .setTitle('New Multiplayer Shared Folder')
+                .setIcon('dot-network')
+                .onClick(() => new SharedFolderModal(this.app, this, file).open());
+            });
+          }
         }
       })
     );
@@ -198,154 +199,6 @@ export default class Multiplayer extends Plugin {
   }
   async saveSettings() {
     await this.saveData(this.settings);
-  }
-}
-class SharedFolderModal extends Modal {
-  plugin: Multiplayer;
-  folder: TFolder;
-
-  constructor(app: App, plugin: Multiplayer, folder: TFolder) {
-    super(app);
-    this.plugin = plugin;
-    this.folder = folder;
-  }
-
-  onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('modal-style-multiplayer');
-    contentEl.empty();
-    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.path.contains(sharedFolder.basePath))
-    if (sharedFolder) {
-      contentEl.createEl("h2", { text: "SharedFolder already exists" });
-      contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'})
-      const button = contentEl.createEl('button', { text: 'OK', attr: { class: 'btn btn-ok' } })
-      button.onClickEvent((ev) => {
-        this.close()
-      })
-    } else {
-      contentEl.createEl("h2", { text: "Create a new sharedFolder" });
-      contentEl.createEl("form", "form-multiplayer",
-        (form) => {
-          form.createEl("label", {
-            attr: { for: "sharedFolder-guid" },
-            text: "Optional GUID: "
-          })
-
-          form.createEl("input", {
-            type: "text",
-            attr: {
-              name: "guid",
-              id: "sharedFolder-guid"
-            },
-            placeholder: "SharedFolder password",
-          });
-
-          form.createEl("br")
-
-          form.createEl("label", {
-            attr: { for: "sharedFolder-password" },
-            text: "Optional password: "
-          })
-
-          form.createEl("input", {
-            type: "password",
-            attr: {
-              name: "password",
-              id: "sharedFolder-password"
-            },
-            placeholder: "SharedFolder password",
-          });
-          form.createEl("br")
-
-          form.createEl("label", {
-            attr: { for: "sharedFolder-servers" },
-            text: "Optional signaling servers: "
-          })
-
-          form.createEl("input", {
-            type: "text",
-            attr: {
-              name: "servers",
-              id: "sharedFolder-servers"
-            },
-            placeholder: "wss://signaling.yjs.dev",
-          });
-
-          form.createEl("br")
-
-          form.createEl("button", {
-            text: "Create",
-            type: "submit",
-          });
-          form.onsubmit = async (e) => {
-            e.preventDefault();
-            // @ts-expect-error, not typed
-            const guid = form.querySelector('input[name="guid"]').value || null
-
-            // @ts-expect-error, not typed
-            const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
-            const signalingServers = servers.split(',');
-
-            const sharedFolders = this.plugin.settings.sharedFolders
-
-            // @ts-expect-error, not typed
-            const password = form.querySelector('input[name="password"]').value;
-            const path = this.folder.path
-            const settings = { guid: guid || randomUUID(), path: path, signalingServers, password }
-            this.plugin.settings.sharedFolders.push(settings)
-            this.plugin.saveSettings();
-            //@ts-expect-error
-            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getBasePath()))
-            this.plugin.addIcons()
-            this.close();
-          }
-        })
-    }
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-  }
-}
-
-class UnshareFolderModal extends Modal {
-  plugin: Multiplayer;
-  folder: SharedFolder;
-
-  constructor(app: App, plugin: Multiplayer, folder: SharedFolder) {
-    super(app);
-    this.plugin = plugin;
-    this.folder = folder;
-  }
-
-  onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('modal-style-multiplayer');
-    contentEl.empty();
-    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.basePath == sharedFolder.basePath)
-    if (sharedFolder) {
-      contentEl.createEl("h2", { text: "Unshare Folder" });
-      contentEl.createEl('p', { text: 'Do you want to unshare this folder?'})
-      const button = contentEl.createEl('button', { text: 'Unshare Folder', attr: { class: 'btn btn-danger' } })
-      button.onClickEvent((ev) => {
-        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
-        this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.basePath !== sharedFolder.basePath)
-        this.plugin.saveSettings()
-        this.plugin.removeIcon(this.folder.basePath)
-        this.folder.docs.forEach(doc => {
-          doc.close()
-          doc.destroy()
-        })
-        this.folder.destroy()
-        this.close()
-      })
-    } 
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
   }
 }
 class MultiplayerSettingTab extends PluginSettingTab {

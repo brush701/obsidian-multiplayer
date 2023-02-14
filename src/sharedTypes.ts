@@ -9,13 +9,11 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open} from "fs"
-
-
 export interface SharedFolderSettings {
   guid: string
   path: string 
-  signalingServers?: string[]
-  password?: string
+  signalingServers: string[]
+  password: string
 }
 
 const usercolors = [
@@ -28,9 +26,8 @@ const usercolors = [
   { color: '#8acb88', light: '#8acb8833' },
   { color: '#1be7ff', light: '#1be7ff33' }
 ]
-
  export class SharedFolder {
-  guid: string
+  settings: SharedFolderSettings
   root: Y.Doc
   basePath: string
   ids: Y.Map<string> // Maps document paths to guids
@@ -38,16 +35,16 @@ const usercolors = [
   private _persistence: IndexeddbPersistence
   private _provider: WebrtcProvider
   private _vaultRoot:string
+ 
 
-  constructor({guid, path, signalingServers, password}: SharedFolderSettings, vaultRoot: string) {
+  constructor(settings: SharedFolderSettings, vaultRoot: string) {
     this._vaultRoot = vaultRoot + "/"
-    this.basePath = path
-    this.guid = guid
+    this.settings = settings
     this.root = new Y.Doc()
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
-    this._persistence = new IndexeddbPersistence(guid, this.root)
-    this._provider = new WebrtcProvider(guid, this.root)
+    this._persistence = new IndexeddbPersistence(settings.guid, this.root)
+    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: settings.password})
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
@@ -89,7 +86,7 @@ const usercolors = [
     }
 
     const guid = this.ids.get(path) || randomUUID()
-    const doc = new SharedDoc(path, guid)
+    const doc = new SharedDoc(path, guid, this)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
       if (contents && text.toString() != contents)
@@ -116,6 +113,7 @@ const usercolors = [
 
 export class SharedDoc {
   guid: string
+  private _parent: SharedFolder
   private _provider: WebrtcProvider;
   private _binding: Extension;
 
@@ -145,11 +143,12 @@ export class SharedDoc {
     return this.ydoc.getText('contents').toString()
   }
 
-  constructor(path: string, guid: string) {
+  constructor(path: string, guid: string, parent: SharedFolder) {
     console.log('Creating shared doc', path, guid)
+    this._parent = parent
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this._provider = new WebrtcProvider(guid, this.ydoc)
+    this._provider = new WebrtcProvider(guid, this.ydoc, {password: parent.settings.password, signaling: parent.settings.signalingServers})
     this.path = path
     this.guid = guid
     this.connect()
@@ -168,7 +167,7 @@ export class SharedDoc {
 
   connect() {
     if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc) 
-    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc)
+    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {password: this._parent.settings.password, signaling: this._parent.settings.signalingServers})
     if (!this._provider.connected)
         this._provider.connect()
   }
