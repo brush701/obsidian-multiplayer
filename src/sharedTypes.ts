@@ -29,7 +29,6 @@ const usercolors = [
  export class SharedFolder {
   settings: SharedFolderSettings
   root: Y.Doc
-  basePath: string
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
   private _persistence: IndexeddbPersistence
@@ -57,7 +56,7 @@ const usercolors = [
 
   // Get the shared doc for a file
   getDoc(path: string, create: boolean = true): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
+    if (!path.startsWith(this.settings.path)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
     const id = this.ids.get(path)
@@ -76,7 +75,7 @@ const usercolors = [
 
   // Create a new shared doc
   createDoc(path: string, loadFromDisk:boolean = false): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
+    if (!path.startsWith(this.settings.path)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
 

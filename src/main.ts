@@ -46,7 +46,7 @@ export default class Multiplayer extends Plugin {
         // Add a menu item to the folder context menu to create a board
         if (file instanceof TFolder) {
           const isShared = this.sharedFolders.some(folder => {
-            if (file.path.contains(folder.basePath)) {
+            if (file.path.contains(folder.settings.path)) {
               menu.addItem((item) => {
                 item
                   .setTitle('Delete Multiplayer Shared Folder')
@@ -139,7 +139,7 @@ export default class Multiplayer extends Plugin {
     fileExplorers.forEach(fileExplorer => {
       this.sharedFolders.forEach(folder => {
         //@ts-expect-error
-        const fileItem = fileExplorer.view.fileItems[folder.basePath];
+        const fileItem = fileExplorer.view.fileItems[folder.settings.path];
         if (fileItem) {
           const titleEl = fileItem.titleEl;
           const titleInnerEl = fileItem.titleInnerEl;
@@ -183,7 +183,7 @@ export default class Multiplayer extends Plugin {
 
   static getSharedFolder(path: string) : SharedFolder {
     // @ts-expect-error, not typed
-    return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
+    return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
   }
 
   

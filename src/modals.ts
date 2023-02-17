@@ -17,7 +17,7 @@ export class SharedFolderModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('modal-style-multiplayer');
     contentEl.empty();
-    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.path.contains(sharedFolder.basePath))
+    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.path.contains(sharedFolder.settings.path))
     if (sharedFolder) {
       contentEl.createEl("h2", { text: "SharedFolder already exists" });
       contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'})
@@ -98,7 +98,7 @@ export class SharedFolderModal extends Modal {
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             //@ts-expect-error
-            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getBasePath()))
+            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getsettings.path()))
             this.plugin.addIcons()
             this.close();
           }
@@ -126,16 +126,16 @@ export class UnshareFolderModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('modal-style-multiplayer');
     contentEl.empty();
-    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.basePath == sharedFolder.basePath)
+    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.settings.path == sharedFolder.settings.path)
     if (sharedFolder) {
       contentEl.createEl("h2", { text: "Unshare Folder" });
       contentEl.createEl('p', { text: 'Do you want to unshare this folder?'})
       const button = contentEl.createEl('button', { text: 'Unshare Folder', attr: { class: 'btn btn-danger' } })
       button.onClickEvent((ev) => {
-        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.basePath)
-        this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.basePath !== sharedFolder.basePath)
+        this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.settings.path)
+        this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.settings.path !== sharedFolder.settings.path)
         this.plugin.saveSettings()
-        this.plugin.removeIcon(this.folder.basePath)
+        this.plugin.removeIcon(this.folder.settings.path)
         this.folder.docs.forEach(doc => {
           doc.close()
           doc.destroy()
