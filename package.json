@@ -16,6 +16,8 @@
 		"@typescript-eslint/parser": "^5.29.0",
 		"builtin-modules": "^3.3.0",
 		"esbuild": "0.14.47",
+		"jszip": "^3.10.1",
+		"keytar": "^7.9.0",
 		"monkey-around": "^2.3.0",
 		"obsidian": "latest",
 		"tslib": "2.4.0",
@@ -26,6 +28,6 @@
 		"y-protocols": "^1.0.5",
 		"y-webrtc": "^10.2.3",
 		"yjs": "^13.5.43",
-		"jszip": "^3.10.1"
+		"electron": "^23.1.0"
 	}
 }

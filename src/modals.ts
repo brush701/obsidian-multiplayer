@@ -2,7 +2,9 @@ import { Modal, TFolder, App } from "obsidian";
 import  Multiplayer from "./main"
 import { randomUUID } from "crypto";
 import { SharedFolder } from "./sharedTypes";
+import { setPassword } from "./util";
 
+const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.tektite.team'
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
   folder: TFolder;
@@ -59,21 +61,6 @@ export class SharedFolderModal extends Modal {
             placeholder: "SharedFolder password",
           });
           form.createEl("br")
-
-          form.createEl("label", {
-            attr: { for: "sharedFolder-servers" },
-            text: "Optional signaling servers: "
-          })
-
-          form.createEl("input", {
-            type: "text",
-            attr: {
-              name: "servers",
-              id: "sharedFolder-servers"
-            },
-            placeholder: "wss://signaling.yjs.dev",
-          });
-
           form.createEl("br")
 
           form.createEl("button", {
@@ -83,18 +70,16 @@ export class SharedFolderModal extends Modal {
           form.onsubmit = async (e) => {
             e.preventDefault();
             // @ts-expect-error, not typed
-            const guid = form.querySelector('input[name="guid"]').value || null
+            const guid = form.querySelector('input[name="guid"]').value || randomUUID()
 
-            // @ts-expect-error, not typed
-            const servers = form.querySelector('input[name="servers"]').value || DEFAULT_SIGNALING_SERVERS
+            const servers = DEFAULT_SIGNALING_SERVERS
             const signalingServers = servers.split(',');
-
-            const sharedFolders = this.plugin.settings.sharedFolders
-
+            
             // @ts-expect-error, not typed
             const password = form.querySelector('input[name="password"]').value;
+            setPassword(guid, password)
             const path = this.folder.path
-            const settings = { guid: guid || randomUUID(), path: path, signalingServers, password }
+            const settings = { guid: guid , path: path, signalingServers: signalingServers}
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             //@ts-expect-error

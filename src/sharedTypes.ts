@@ -9,11 +9,11 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open} from "fs"
-export interface SharedFolderSettings {
+import { getPassword, setPassword } from './util';
+export interface SharedTypeSettings {
   guid: string
   path: string 
   signalingServers: string[]
-  password: string
 }
 
 const usercolors = [
@@ -27,7 +27,7 @@ const usercolors = [
   { color: '#1be7ff', light: '#1be7ff33' }
 ]
  export class SharedFolder {
-  settings: SharedFolderSettings
+  settings: SharedTypeSettings
   root: Y.Doc
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
@@ -36,14 +36,14 @@ const usercolors = [
   private _vaultRoot:string
  
 
-  constructor(settings: SharedFolderSettings, vaultRoot: string) {
+  constructor(settings: SharedTypeSettings, vaultRoot: string) {
     this._vaultRoot = vaultRoot + "/"
     this.settings = settings
     this.root = new Y.Doc()
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
-    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: settings.password})
+    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: getPassword(settings.guid)})
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
@@ -147,7 +147,7 @@ export class SharedDoc {
     this._parent = parent
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this._provider = new WebrtcProvider(guid, this.ydoc, {password: parent.settings.password, signaling: parent.settings.signalingServers})
+    this._provider = new WebrtcProvider(guid, this.ydoc, {password: getPassword(guid), signaling: parent.settings.signalingServers})
     this.path = path
     this.guid = guid
     this.connect()
@@ -166,7 +166,7 @@ export class SharedDoc {
 
   connect() {
     if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc) 
-    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {password: this._parent.settings.password, signaling: this._parent.settings.signalingServers})
+    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {password: getPassword(this.guid), signaling: this._parent.settings.signalingServers})
     if (!this._provider.connected)
         this._provider.connect()
   }

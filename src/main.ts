@@ -13,14 +13,15 @@ import {
   Notice
 } from "obsidian";
 
-import { SharedFolder, SharedFolderSettings } from './sharedTypes'
+import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
 import * as util from './util'
 import { SharedFolderModal, UnshareFolderModal } from "./modals";
+
 interface MultiplayerSettings {
-  sharedFolders: SharedFolderSettings[];
+  sharedFolders: SharedTypeSettings[];
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
@@ -29,7 +30,6 @@ const DEFAULT_SETTINGS: MultiplayerSettings = {
 
 const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
 
-const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.yjs.dev, wss://y-webrtc-signaling-eu.herokuapp.com'
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
   sharedFolders: SharedFolder[];
@@ -61,6 +61,15 @@ export default class Multiplayer extends Plugin {
                     new Notice("Copied GUID")
                   }))
               })
+
+              menu.addItem((item) => {
+                item
+                  .setTitle('Copy Password')
+                  .onClick(() => navigator.clipboard.writeText(util.getPassword(folder.settings.guid)).then(() => {
+                    new Notice("Copied Password")
+                  }))
+              })
+
               return true
             }
           })
@@ -79,7 +88,7 @@ export default class Multiplayer extends Plugin {
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
-    this.settings.sharedFolders.forEach((sharedFolder: SharedFolderSettings) => {
+    this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath())
       this.sharedFolders.push(newSharedFolder)
     })
