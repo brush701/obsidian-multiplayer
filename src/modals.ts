@@ -2,6 +2,7 @@ import { Modal, TFolder, App, FileSystemAdapter } from "obsidian";
 import  Multiplayer from "./main"
 import { randomUUID } from "crypto";
 import { SharedFolder } from "./sharedTypes";
+import { setPassword } from "./util";
 
 const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.tektite.team'
 export class SharedFolderModal extends Modal {
@@ -76,6 +77,7 @@ export class SharedFolderModal extends Modal {
             
             // @ts-expect-error, not typed
             const password = form.querySelector('input[name="password"]').value;
+            setPassword(guid, password)
             const path = this.folder.path
             const settings = { guid: guid , path: path, signalingServers: signalingServers, encPw: this.plugin.pwMgr.encryptPassword(password)}
             this.plugin.settings.sharedFolders.push(settings)
