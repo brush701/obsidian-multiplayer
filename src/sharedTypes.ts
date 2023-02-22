@@ -9,7 +9,6 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
-import { getPassword, setPassword } from './util';
 import { dirname } from 'path';
 import Multiplayer from './main';
 export interface SharedTypeSettings {

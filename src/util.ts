@@ -1,7 +1,7 @@
+import { CipherGCMTypes } from "crypto"
+import * as crypto from "crypto"
 import { createWriteStream, read, readFile, readFileSync, writeFileSync } from "fs"
 import JSZip from 'jszip'
-import { CipherGCMTypes } from "crypto"
-import * as crypto from 'crypto'
 
 export function backup(path: string) {
     let file = path + "/" + Date.now().toString() + "-multiplayer-backup.zip"

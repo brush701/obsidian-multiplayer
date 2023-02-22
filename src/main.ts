@@ -23,8 +23,8 @@ import { PasswordManager } from "./pwManager";
 
 interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[];
-  salt: string
   username: string
+  salt: string
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
