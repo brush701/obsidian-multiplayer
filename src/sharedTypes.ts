@@ -100,8 +100,34 @@ const usercolors = [
     this.ids.set(path, guid)
     
     console.log('Created ydoc', path, guid)
-    return doc
+     return doc
+   }
+
+   deleteDoc(path: string) {
+     if (!path.startsWith(this.settings.path)) {
+       throw new Error('Path is not in shared folder: ' + path)
+     }
+
+    const guid = this.ids.get(path)
+    if (guid) {
+      this.ids.delete(guid)
+      this.docs.get(guid).destroy()
+      this.docs.delete(guid)
+   }
   }
+  
+  renameDoc(oldpath: string, newpath: string) {
+     if (!oldpath.startsWith(this.settings.path)) {
+       throw new Error('Path is not in shared folder: ' + oldpath)
+     }
+
+    const guid = this.ids.get(oldpath)
+    if (guid) {
+      this.ids.delete(oldpath)
+      this.ids.set(newpath, guid)
+   }
+  }
+
 
   destroy()
   {
