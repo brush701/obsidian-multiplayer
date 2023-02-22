@@ -18,14 +18,17 @@ import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
 import * as util from './util'
-import { SharedFolderModal, UnshareFolderModal } from "./modals";
+import { PasswordModal, ResetPasswordModal, SharedFolderModal, UnshareFolderModal } from "./modals";
+import { PasswordManager } from "./pwManager";
 
 interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[];
+  salt: string
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
+  salt: ""
 };
 
 const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
@@ -33,6 +36,7 @@ const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" vie
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
   sharedFolders: SharedFolder[];
+  pwMgr: PasswordManager
   private _extensions: Extension[];
 
   async onload() {
@@ -40,7 +44,18 @@ export default class Multiplayer extends Plugin {
     await this.loadSettings();
     this.sharedFolders = [ ]
     this._extensions = []
+    new PasswordModal(this.app, this, (result: string) => {
+      try {
+      this.pwMgr = new PasswordManager(result, this)
+      this.setup()
+      } catch {
+        new Notice("Incorrect multiplayer password")
+        this.unload()
+      }
+    }).open()
+  }
 
+  setup() {
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
         // Add a menu item to the folder context menu to create a board
@@ -65,7 +80,7 @@ export default class Multiplayer extends Plugin {
               menu.addItem((item) => {
                 item
                   .setTitle('Copy Password')
-                  .onClick(() => navigator.clipboard.writeText(util.getPassword(folder.settings.guid)).then(() => {
+                  .onClick(() => navigator.clipboard.writeText(this.pwMgr.getPassword(folder.settings.guid)).then(() => {
                     new Notice("Copied Password")
                   }))
               })
@@ -89,7 +104,7 @@ export default class Multiplayer extends Plugin {
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
-      const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath())
+      const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
       this.sharedFolders.push(newSharedFolder)
     })
    
@@ -232,6 +247,14 @@ class MultiplayerSettingTab extends PluginSettingTab {
       .setButtonText("Backup Shared Folders")
       .onClick(e => {
         util.backup((this.app.vault.adapter as FileSystemAdapter).getBasePath() + "/.obsidian/plugins/obsidian-multiplayer") // For now, backup to the plugin folder
+      })
+     
+     new ButtonComponent(containerEl)
+      .setButtonText("Reset Master Password")
+      .onClick(e => {
+        new ResetPasswordModal(this.app, this.plugin, (result) => {
+          this.plugin.pwMgr.resetPassword(result, this.plugin.sharedFolders.map(e => e.settings.guid))
+        }).open()
       })
   }
 }

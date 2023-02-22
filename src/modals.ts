@@ -1,8 +1,7 @@
-import { Modal, TFolder, App } from "obsidian";
+import { Modal, TFolder, App, FileSystemAdapter } from "obsidian";
 import  Multiplayer from "./main"
 import { randomUUID } from "crypto";
 import { SharedFolder } from "./sharedTypes";
-import { setPassword } from "./util";
 
 const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.tektite.team'
 export class SharedFolderModal extends Modal {
@@ -77,13 +76,11 @@ export class SharedFolderModal extends Modal {
             
             // @ts-expect-error, not typed
             const password = form.querySelector('input[name="password"]').value;
-            setPassword(guid, password)
             const path = this.folder.path
-            const settings = { guid: guid , path: path, signalingServers: signalingServers}
+            const settings = { guid: guid , path: path, signalingServers: signalingServers, encPw: this.plugin.pwMgr.encryptPassword(password)}
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
-            //@ts-expect-error
-            this.plugin.sharedFolders.push(new SharedFolder(settings, this.app.vault.adapter.getsettings.path()))
+            this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))
             this.plugin.addIcons()
             this.close();
           }
@@ -114,7 +111,7 @@ export class UnshareFolderModal extends Modal {
     const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.settings.path == sharedFolder.settings.path)
     if (sharedFolder) {
       contentEl.createEl("h2", { text: "Unshare Folder" });
-      contentEl.createEl('p', { text: 'Do you want to unshare this folder?'})
+      contentEl.createEl('p', { text: 'Are you sure you want to unshare this folder?'})
       const button = contentEl.createEl('button', { text: 'Unshare Folder', attr: { class: 'btn btn-danger' } })
       button.onClickEvent((ev) => {
         this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.settings.path)
@@ -129,6 +126,117 @@ export class UnshareFolderModal extends Modal {
         this.close()
       })
     } 
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+export class PasswordModal extends Modal {
+  plugin: Multiplayer;
+  onSubmit: (result: string) => void
+
+
+  constructor(app: App, plugin: Multiplayer, onSubmit: (result: string) => void) {
+    super(app);
+    this.plugin = plugin;
+    this.onSubmit = onSubmit
+  }
+
+  onOpen() {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass('modal-style-multiplayer');
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Multiplayer Password" });
+    contentEl.createEl('p', { text: 'Please provide your master password. If this is your first time loading the plugin, you can set your new password here.'})
+    contentEl.createEl("form", "form-multiplayer",
+      (form) => {
+        form.createEl("label", {
+          attr: { for: "password" },
+          text: "Password: "
+        })
+
+        form.createEl("input", {
+          type: "password",
+          attr: {
+            name: "password",
+            id: "password"
+          }
+        });
+
+        form.createEl("br")
+        form.createEl("br")
+
+        form.createEl("button", {
+          text: "Create",
+          type: "submit",
+        });
+
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          // @ts-expect-error, not typed
+          const password = form.querySelector('input[name="password"]').value
+          this.close()
+          this.onSubmit(password)
+        }
+      })
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+export class ResetPasswordModal extends Modal {
+  plugin: Multiplayer;
+  onSubmit: (result: string) => void
+
+
+  constructor(app: App, plugin: Multiplayer, onSubmit: (result: string) => void) {
+    super(app);
+    this.plugin = plugin;
+    this.onSubmit = onSubmit
+  }
+
+  onOpen() {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass('modal-style-multiplayer');
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Reset Master Password" });
+    contentEl.createEl("form", "form-multiplayer",
+      (form) => {
+        form.createEl("label", {
+          attr: { for: "password" },
+          text: "New Password: "
+        })
+
+        form.createEl("input", {
+          type: "password",
+          attr: {
+            name: "password",
+            id: "password"
+          }
+        });
+
+        form.createEl("br")
+        form.createEl("br")
+
+        form.createEl("button", {
+          text: "Create",
+          type: "submit",
+        });
+
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          // @ts-expect-error, not typed
+          const password = form.querySelector('input[name="password"]').value
+          this.close()
+          this.onSubmit(password)
+        }
+      })
   }
 
   onClose() {
