@@ -8,7 +8,8 @@ import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
-import { existsSync, readFileSync, open} from "fs"
+import { existsSync, readFileSync, open, mkdirSync} from "fs"
+import { dirname } from 'path';
 import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
@@ -51,8 +52,13 @@ const usercolors = [
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
-        if (existsSync(path)) {
-          open(path,"w", () => {}) //create the file
+        let fullPath = this._vaultRoot + path 
+        if (!existsSync(fullPath)) {
+          let dir = dirname(fullPath)
+          if (!existsSync(dir)) { 
+            mkdirSync(dir, { recursive: true})
+          }
+          open(fullPath,"w", () => {}) //create the file
         }
       })
     })
