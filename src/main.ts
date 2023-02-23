@@ -18,6 +18,7 @@ import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
 import * as util from './util'
+
 import { PasswordModal, ResetPasswordModal, SharedFolderModal, UnshareFolderModal } from "./modals";
 import { PasswordManager } from "./pwManager";
 
@@ -30,7 +31,7 @@ interface MultiplayerSettings {
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
   salt: "",
-  username: "Anonymous",
+  username: "Anonymous"
 };
 
 const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
@@ -105,9 +106,11 @@ export default class Multiplayer extends Plugin {
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
+
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
       sharedFolder.username = this.settings.username
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
+
       this.sharedFolders.push(newSharedFolder)
     })
    
@@ -160,7 +163,9 @@ export default class Multiplayer extends Plugin {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
+
           const sharedFolder = plugin.getSharedFolder(file.path) 
+
           if (sharedFolder) {
             try {
               const subdoc = sharedFolder.getDoc(file.path)
@@ -233,7 +238,9 @@ export default class Multiplayer extends Plugin {
   }
 
   getSharedFolder(path: string) : SharedFolder {
+
     return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
+
   }
 
   
@@ -251,6 +258,7 @@ export default class Multiplayer extends Plugin {
     await this.saveData(this.settings);
   }
 }
+
 class MultiplayerSettingTab extends PluginSettingTab {
 
   plugin: Multiplayer;

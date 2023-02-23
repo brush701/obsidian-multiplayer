@@ -35,11 +35,11 @@ const usercolors = [
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
   plugin: Multiplayer
+
   private _persistence: IndexeddbPersistence
   private _provider: WebrtcProvider
   private _vaultRoot:string
  
-
   constructor(settings: SharedTypeSettings, vaultRoot: string, plugin: Multiplayer) {
     this.plugin = plugin  
     this._vaultRoot = vaultRoot + "/"
@@ -94,7 +94,6 @@ const usercolors = [
       contents = readFileSync(this._vaultRoot+path, "utf-8")
     }
 
-    const guid = this.ids.get(path) || randomUUID()
     const doc = new SharedDoc(path, guid, this)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
@@ -119,7 +118,7 @@ const usercolors = [
       this.ids.delete(guid)
       this.docs.get(guid).destroy()
       this.docs.delete(guid)
-   }
+ 
   }
   
   renameDoc(oldpath: string, newpath: string) {
@@ -132,7 +131,21 @@ const usercolors = [
       this.ids.delete(oldpath)
       this.ids.set(newpath, guid)
    }
+
   }
+  
+  renameDoc(oldpath: string, newpath: string) {
+     if (!oldpath.startsWith(this.basePath)) {
+       throw new Error('Path is not in shared folder: ' + oldpath)
+     }
+
+    const guid = this.ids.get(oldpath)
+    if (guid) {
+      this.ids.delete(oldpath)
+      this.ids.set(newpath, guid)
+   }
+  }
+
 
 
   destroy()
@@ -173,10 +186,12 @@ export class SharedDoc {
   private _persistence: IndexeddbPersistence
   ydoc: Y.Doc
   path: string
+  username: string
 
   public get text(): string {
     return this.ydoc.getText('contents').toString()
   }
+
 
   constructor(path: string, guid: string, parent: SharedFolder) {
     console.log('Creating shared doc', path, guid)
