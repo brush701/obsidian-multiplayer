@@ -90,7 +90,7 @@ export default class Multiplayer extends Plugin {
     var extensions = this._extensions
     this.app.workspace.on("file-open", file => {
       if (file) {
-        const sharedFolder = Multiplayer.getSharedFolder(file.path)
+        const sharedFolder = this.getSharedFolder(file.path)
         if (sharedFolder) {
           const sharedDoc = sharedFolder.getDoc(file.path)
           sharedDoc.connect()
@@ -107,12 +107,34 @@ export default class Multiplayer extends Plugin {
         }
       }
     })
+
+    this.app.vault.on("create", file => { 
+      let folder = this.getSharedFolder(file.path)
+      if (folder) {
+        folder.createDoc(file.path)
+      }
+    })
+
+    this.app.vault.on("delete", file => {
+      let folder = this.getSharedFolder(file.path)
+      if (folder) {
+        folder.deleteDoc(file.path)
+      }
+    })
+
+    this.app.vault.on("rename", (file, oldPath) => {
+      let folder = this.getSharedFolder(file.path)
+      if (folder) {
+        folder.renameDoc(file.path, oldPath)
+      }
+
+    })
     
     const patchOnUnloadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
-          const sharedFolder = Multiplayer.getSharedFolder(file.path) 
+          const sharedFolder = this.getSharedFolder(file.path) 
           if (sharedFolder) {
             try {
               const subdoc = sharedFolder.getDoc(file.path)
@@ -184,9 +206,8 @@ export default class Multiplayer extends Plugin {
     })
   }
 
-  static getSharedFolder(path: string) : SharedFolder {
-    // @ts-expect-error, not typed
-    return app.plugins.plugins['obsidian-multiplayer'].sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
+  getSharedFolder(path: string) : SharedFolder {
+    return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.basePath))
   }
 
   

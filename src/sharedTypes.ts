@@ -8,7 +8,8 @@ import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
-import { existsSync, readFileSync, open} from "fs"
+import { existsSync, readFileSync, open, mkdirSync} from "fs"
+import { dirname } from 'path';
 
 
 export interface SharedFolderSettings {
@@ -54,8 +55,13 @@ const usercolors = [
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
-        if (existsSync(path)) {
-          open(path,"w", () => {}) //create the file
+        let fullPath = this._vaultRoot + path 
+        if (!existsSync(fullPath)) {
+          let dir = dirname(fullPath)
+          if (!existsSync(dir)) { 
+            mkdirSync(dir, { recursive: true})
+          }
+          open(fullPath,"w", () => {}) //create the file
         }
       })
     })
@@ -103,8 +109,34 @@ const usercolors = [
     this.ids.set(path, guid)
     
     console.log('Created ydoc', path, guid)
-    return doc
+     return doc
+   }
+
+   deleteDoc(path: string) {
+     if (!path.startsWith(this.basePath)) {
+       throw new Error('Path is not in shared folder: ' + path)
+     }
+
+    const guid = this.ids.get(path)
+    if (guid) {
+      this.ids.delete(guid)
+      this.docs.get(guid).destroy()
+      this.docs.delete(guid)
+   }
   }
+  
+  renameDoc(oldpath: string, newpath: string) {
+     if (!oldpath.startsWith(this.basePath)) {
+       throw new Error('Path is not in shared folder: ' + oldpath)
+     }
+
+    const guid = this.ids.get(oldpath)
+    if (guid) {
+      this.ids.delete(oldpath)
+      this.ids.set(newpath, guid)
+   }
+  }
+
 
   destroy()
   {
