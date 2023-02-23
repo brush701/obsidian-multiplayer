@@ -94,6 +94,7 @@ const usercolors = [
       contents = readFileSync(this._vaultRoot+path, "utf-8")
     }
 
+    const guid = this.ids.get(path)
     const doc = new SharedDoc(path, guid, this)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
@@ -113,13 +114,13 @@ const usercolors = [
        throw new Error('Path is not in shared folder: ' + path)
      }
 
-    const guid = this.ids.get(path)
-    if (guid) {
-      this.ids.delete(guid)
-      this.docs.get(guid).destroy()
-      this.docs.delete(guid)
- 
-  }
+     const guid = this.ids.get(path)
+     if (guid) {
+       this.ids.delete(guid)
+       this.docs.get(guid).destroy()
+       this.docs.delete(guid)
+     }
+   }
   
   renameDoc(oldpath: string, newpath: string) {
      if (!oldpath.startsWith(this.settings.path)) {
@@ -133,20 +134,6 @@ const usercolors = [
    }
 
   }
-  
-  renameDoc(oldpath: string, newpath: string) {
-     if (!oldpath.startsWith(this.basePath)) {
-       throw new Error('Path is not in shared folder: ' + oldpath)
-     }
-
-    const guid = this.ids.get(oldpath)
-    if (guid) {
-      this.ids.delete(oldpath)
-      this.ids.set(newpath, guid)
-   }
-  }
-
-
 
   destroy()
   {
