@@ -10,14 +10,13 @@ import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
 import { dirname } from 'path';
-
-
-export interface SharedFolderSettings {
+import Multiplayer from './main';
+export interface SharedTypeSettings {
   guid: string
   path: string 
   username?: string
-  signalingServers?: string[]
-  password?: string
+  signalingServers: string[],
+  encPw: string
 }
 
 const usercolors = [
@@ -30,28 +29,26 @@ const usercolors = [
   { color: '#8acb88', light: '#8acb8833' },
   { color: '#1be7ff', light: '#1be7ff33' }
 ]
-
  export class SharedFolder {
-  guid: string
+  settings: SharedTypeSettings
   root: Y.Doc
-  basePath: string
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
-  username: string
+  plugin: Multiplayer
+
   private _persistence: IndexeddbPersistence
   private _provider: WebrtcProvider
   private _vaultRoot:string
-
-  constructor({guid, path, username, signalingServers, password}: SharedFolderSettings, vaultRoot: string) {
+ 
+  constructor(settings: SharedTypeSettings, vaultRoot: string, plugin: Multiplayer) {
+    this.plugin = plugin  
     this._vaultRoot = vaultRoot + "/"
-    this.basePath = path
-    this.guid = guid
-    this.username = username || "Anonymous"
+    this.settings = settings
     this.root = new Y.Doc()
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
-    this._persistence = new IndexeddbPersistence(guid, this.root)
-    this._provider = new WebrtcProvider(guid, this.root)
+    this._persistence = new IndexeddbPersistence(settings.guid, this.root)
+    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: plugin.pwMgr.getPassword(settings.guid)})
     this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((path, guid) => {
@@ -69,7 +66,7 @@ const usercolors = [
 
   // Get the shared doc for a file
   getDoc(path: string, create: boolean = true): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
+    if (!path.startsWith(this.settings.path)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
     const id = this.ids.get(path)
@@ -88,7 +85,7 @@ const usercolors = [
 
   // Create a new shared doc
   createDoc(path: string, loadFromDisk:boolean = false): SharedDoc {
-    if (!path.startsWith(this.basePath)) {
+    if (!path.startsWith(this.settings.path)) {
       throw new Error('Path is not in shared folder: ' + path)
     }
 
@@ -97,8 +94,7 @@ const usercolors = [
       contents = readFileSync(this._vaultRoot+path, "utf-8")
     }
 
-    const guid = this.ids.get(path) || randomUUID()
-    const doc = new SharedDoc(path, guid, this.username)
+    const doc = new SharedDoc(path, guid, this)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
       if (contents && text.toString() != contents)
@@ -113,7 +109,7 @@ const usercolors = [
    }
 
    deleteDoc(path: string) {
-     if (!path.startsWith(this.basePath)) {
+     if (!path.startsWith(this.settings.path)) {
        throw new Error('Path is not in shared folder: ' + path)
      }
 
@@ -122,7 +118,20 @@ const usercolors = [
       this.ids.delete(guid)
       this.docs.get(guid).destroy()
       this.docs.delete(guid)
+ 
+  }
+  
+  renameDoc(oldpath: string, newpath: string) {
+     if (!oldpath.startsWith(this.settings.path)) {
+       throw new Error('Path is not in shared folder: ' + oldpath)
+     }
+
+    const guid = this.ids.get(oldpath)
+    if (guid) {
+      this.ids.delete(oldpath)
+      this.ids.set(newpath, guid)
    }
+
   }
   
   renameDoc(oldpath: string, newpath: string) {
@@ -138,6 +147,7 @@ const usercolors = [
   }
 
 
+
   destroy()
   {
     this.docs.forEach(doc => {
@@ -151,6 +161,7 @@ const usercolors = [
 
 export class SharedDoc {
   guid: string
+  private _parent: SharedFolder
   private _provider: WebrtcProvider;
   private _binding: Extension;
 
@@ -162,7 +173,7 @@ export class SharedDoc {
             const undoManager = new Y.UndoManager(yText)
 
             this._provider.awareness.setLocalStateField('user', {
-                name: this.username,
+                name: this._parent.plugin.settings.username,
                 color: userColor.color,
                 colorLight: userColor.light
             })
@@ -181,12 +192,13 @@ export class SharedDoc {
     return this.ydoc.getText('contents').toString()
   }
 
-  constructor(path: string, guid: string, username?: string) {
+
+  constructor(path: string, guid: string, parent: SharedFolder) {
     console.log('Creating shared doc', path, guid)
+    this._parent = parent
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this._provider = new WebrtcProvider(guid, this.ydoc)
-    this.username = username || "Anonymous"
+    this._provider = new WebrtcProvider(guid, this.ydoc, {password: parent.plugin.pwMgr.getPassword(guid), signaling: parent.settings.signalingServers})
     this.path = path
     this.guid = guid
     this.connect()
@@ -205,7 +217,7 @@ export class SharedDoc {
 
   connect() {
     if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc) 
-    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc)
+    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {password: this._parent.plugin.pwMgr.getPassword(this.guid), signaling: this._parent.settings.signalingServers})
     if (!this._provider.connected)
         this._provider.connect()
   }

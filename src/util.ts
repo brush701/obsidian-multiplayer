@@ -1,4 +1,6 @@
-import { createWriteStream, read, readFile } from "fs"
+import { CipherGCMTypes } from "crypto"
+import * as crypto from "crypto"
+import { createWriteStream, read, readFile, readFileSync, writeFileSync } from "fs"
 import JSZip from 'jszip'
 
 export function backup(path: string) {
