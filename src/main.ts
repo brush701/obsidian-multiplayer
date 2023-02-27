@@ -125,8 +125,7 @@ export default class Multiplayer extends Plugin {
           if (view) {
             extensions.push(sharedDoc.binding)
             sharedDoc.onceSynced().then(() => {
-              //@ts-expect-error
-              app.plugins.plugins['obsidian-multiplayer'].registerEditorExtension(extensions)
+              this.registerEditorExtension(extensions)
               app.workspace.updateOptions()
               console.log("binding yjs")
             })
@@ -150,7 +149,7 @@ export default class Multiplayer extends Plugin {
     })
 
     this.app.vault.on("rename", (file, oldPath) => {
-      let folder = this.getSharedFolder(file.path)
+      let folder = this.getSharedFolder(oldPath)
       if (folder) {
         folder.renameDoc(file.path, oldPath)
       }
@@ -168,7 +167,7 @@ export default class Multiplayer extends Plugin {
 
           if (sharedFolder) {
             try {
-              const subdoc = sharedFolder.getDoc(file.path)
+              const subdoc = sharedFolder.getDoc(file.path, false)
               console.log('disconnecting room', subdoc.path)
               subdoc.close()
               extensions.length = 0
