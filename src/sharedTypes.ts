@@ -49,9 +49,9 @@ const usercolors = [
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
     this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: plugin.pwMgr.getPassword(settings.guid)})
-    this._provider.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
+    this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
-      map.forEach((path, guid) => {
+      map.forEach((guid, path) => {
         let fullPath = this._vaultRoot + path 
         if (!existsSync(fullPath)) {
           let dir = dirname(fullPath)
@@ -89,13 +89,16 @@ const usercolors = [
       throw new Error('Path is not in shared folder: ' + path)
     }
 
+    const guid = this.ids.get(path) || randomUUID()
+    if (this.docs.get(guid)) throw new Error("Shared doc already exists: " + path)
+
+    const doc = new SharedDoc(path, guid, this)
+
     var contents = ""
     if (loadFromDisk && existsSync(this._vaultRoot+path)) {
       contents = readFileSync(this._vaultRoot+path, "utf-8")
     }
 
-    const guid = this.ids.get(path)
-    const doc = new SharedDoc(path, guid, this)
     const text = doc.ydoc.getText("contents")
     doc.onceSynced().then( () => {
       if (contents && text.toString() != contents)
@@ -116,13 +119,13 @@ const usercolors = [
 
      const guid = this.ids.get(path)
      if (guid) {
-       this.ids.delete(guid)
+       this.ids.delete(path)
        this.docs.get(guid).destroy()
        this.docs.delete(guid)
      }
    }
   
-  renameDoc(oldpath: string, newpath: string) {
+  renameDoc(newpath: string, oldpath: string) {
      if (!oldpath.startsWith(this.settings.path)) {
        throw new Error('Path is not in shared folder: ' + oldpath)
      }

@@ -22,8 +22,12 @@ export class PasswordManager {
             this._salt = Buffer.from(salt, "base64")
             this._key = getKeyFromPassword(Buffer.from(password), this._salt)
             // To immediately detect whether we have the right password, try to decrypt one
-            if (plugin.settings.sharedFolders.length > 0)
-            decrypt(Buffer.from(plugin.settings.sharedFolders[0].encPw,"base64"), this._key)
+            plugin.settings.sharedFolders.some(folder => {
+                if (folder.encPw) {
+                    decrypt(Buffer.from(folder.encPw, "base64"), this._key)
+                    return true
+                }
+            })
         } else {
             this._salt = getSalt()
             this._key = getKeyFromPassword(Buffer.from(password), this._salt)
@@ -56,13 +60,17 @@ export class PasswordManager {
     getPassword(guid: string): string {
         const folder = this._plugin.settings.sharedFolders.find( el => el.guid == guid)
         if (folder) {
-            return decrypt(Buffer.from(folder.encPw, "base64"), this._key).toString()
+            if (folder.encPw) {
+                return decrypt(Buffer.from(folder.encPw, "base64"), this._key).toString()
+            } else return ""
         }
         else return null
     }
 
     encryptPassword(password: string): string {
-        return encrypt(Buffer.from(password), this._key).toString("base64")
+        if (password) {
+            return encrypt(Buffer.from(password), this._key).toString("base64")
+        } else return ""
     }
 }
 
