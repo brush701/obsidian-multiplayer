@@ -108,7 +108,6 @@ export default class Multiplayer extends Plugin {
 
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
-      sharedFolder.username = this.settings.username
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
 
       this.sharedFolders.push(newSharedFolder)
@@ -276,14 +275,10 @@ class MultiplayerSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.username)
         text.onChange( value => {
           this.plugin.settings.username = value
-          this.plugin.settings.sharedFolders.forEach(folderSettings => {
-            folderSettings.username = value
-          })
           this.plugin.saveSettings()
         })
       }
       )
-      
 
     new ButtonComponent(containerEl)
       .setButtonText("Backup Shared Folders")

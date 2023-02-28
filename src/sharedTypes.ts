@@ -14,7 +14,6 @@ import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
   path: string 
-  username?: string
   signalingServers: string[],
   encPw: string
 }
@@ -61,6 +60,14 @@ const usercolors = [
           open(fullPath,"w", () => {}) //create the file
         }
       })
+      // delete files that are no longer shared
+      let files = this.plugin.app.vault.getFiles()
+      files.forEach(file => {
+        // if the file is in the shared folder and not in the map, move it to the Trash
+        if (file.path.startsWith(this.settings.path) && !map.has(file.path)) {
+          this.plugin.app.vault.adapter.trashLocal(file.path)
+        }
+      })
     })
   }
 
@@ -75,12 +82,13 @@ const usercolors = [
       if (doc !== undefined) {
         return doc
       } else {
-        return this.createDoc(path)
+        return this.createDoc(path, true)
       }
-    } else if (create) 
+    } else if (create) {
       return this.createDoc(path, true)
-    else
+    } else {
       throw new Error('No shared doc for path: ' + path)
+    }
   }
 
   // Create a new shared doc
