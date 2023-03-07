@@ -6,5 +6,5 @@
 	"description": "This is a real time collaboration plugin for Obsidian.",
 	"author": "Ben Rush",
 	"authorUrl": "https://github.com/brush701",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }

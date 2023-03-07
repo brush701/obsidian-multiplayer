@@ -18,6 +18,8 @@ import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
 import * as util from './util'
+import * as manifest from '../manifest.json'
+import { BrowserWindow } from "@electron/remote";
 
 import { PasswordModal, ResetPasswordModal, SharedFolderModal, UnshareFolderModal } from "./modals";
 import { PasswordManager } from "./pwManager";
@@ -25,13 +27,15 @@ import { PasswordManager } from "./pwManager";
 interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[];
   username: string
-  salt: string
+  salt: string,
+  previousRelease: string;
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
   salt: "",
-  username: "Anonymous"
+  username: "Anonymous",
+  previousRelease: "0.0.0"
 };
 
 const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
@@ -59,6 +63,33 @@ export default class Multiplayer extends Plugin {
   }
 
   setup() {
+    const obsidianJustInstalled = this.settings.previousRelease === "0.0.0"
+   /* const window = new BrowserWindow({
+        width: 600,
+        height: 800,
+        webPreferences: {
+          nodeIntegration: false, // We recommend disabling nodeIntegration for security.
+          contextIsolation: true, // We recommend enabling contextIsolation for security.
+          // see https://github.com/electron/electron/blob/master/docs/tutorial/security.md
+        },
+      });
+
+      window.loadURL("https://www.google.com");
+      // TODO: trigger oauth flow on server
+      // if successful, generate a bearer token and store it in the settings
+      // Then include that bearer token in the url query string of the wss connection
+      // Alternatively, can set a bearer token in the cookie and include csrf token in the query string
+
+      const { session: { webRequest } } = window.webContents;*/
+
+    if (obsidianJustInstalled) {
+      this.settings.previousRelease = manifest.version
+      //TODO: add a welcome modal
+    } else if (util.isVersionNewerThanOther(manifest.version, this.settings.previousRelease)) {
+      // TODO: add a modal to show what's new
+      this.settings.previousRelease = manifest.version
+    }
+
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
         // Add a menu item to the folder context menu to create a board
@@ -106,7 +137,6 @@ export default class Multiplayer extends Plugin {
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
-
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
 
@@ -119,10 +149,9 @@ export default class Multiplayer extends Plugin {
         const sharedFolder = this.getSharedFolder(file.path)
         if (sharedFolder) {
           const sharedDoc = sharedFolder.getDoc(file.path)
-          sharedDoc.connect()
           const view = this.app.workspace.getActiveViewOfType(MarkdownView)
           if (view) {
-            extensions.push(sharedDoc.binding)
+            plugin._extensions.push(sharedDoc.binding)
             sharedDoc.onceSynced().then(() => {
               view.editor.setValue(sharedDoc.text)
               this.registerEditorExtension(extensions)
@@ -131,29 +160,19 @@ export default class Multiplayer extends Plugin {
             })
           }
         }
-      }
+      } 
     })
 
     this.app.vault.on("create", file => { 
-      let folder = this.getSharedFolder(file.path)
-      if (folder) {
-        folder.createDoc(file.path)
-      }
+      this.getSharedFolder(file.path)?.createDoc(file.path)
     })
 
     this.app.vault.on("delete", file => {
-      let folder = this.getSharedFolder(file.path)
-      if (folder) {
-        folder.deleteDoc(file.path)
-      }
+      this.getSharedFolder(file.path)?.deleteDoc(file.path)
     })
 
     this.app.vault.on("rename", (file, oldPath) => {
-      let folder = this.getSharedFolder(oldPath)
-      if (folder) {
-        folder.renameDoc(file.path, oldPath)
-      }
-
+      this.getSharedFolder(oldPath)?.renameDoc(file.path, oldPath)
     })
 
     const plugin = this
@@ -169,8 +188,8 @@ export default class Multiplayer extends Plugin {
             try {
               const subdoc = sharedFolder.getDoc(file.path, false)
               console.log('disconnecting room', subdoc.path)
-              subdoc.close()
-              extensions.length = 0
+              extensions.remove(subdoc.binding)
+              subdoc.destroy()
               this.app.workspace.updateOptions()
             }
             catch(e) {
@@ -185,7 +204,10 @@ export default class Multiplayer extends Plugin {
     // register the patches with Obsidian's register method so that it gets unloaded properly
     this.register(patchOnUnloadFile);
   
-    this.app.workspace.onLayoutReady(() => this.addIcons());
+    this.app.workspace.onLayoutReady(() => { 
+      this.addIcons()
+    });
+
     this.registerEvent(this.app.workspace.on('layout-change', () => this.addIcons()));
   }
 
@@ -225,8 +247,6 @@ export default class Multiplayer extends Plugin {
       const fileItem = fileExplorer.view.fileItems[path];
       if (fileItem) {
         const titleEl = fileItem.titleEl;
-        const titleInnerEl = fileItem.titleInnerEl;
-
 
         const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
         if (existingIcon) {
@@ -237,12 +257,8 @@ export default class Multiplayer extends Plugin {
   }
 
   getSharedFolder(path: string) : SharedFolder {
-
     return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
-
   }
-
-  
 
   onunload() {
     this.sharedFolders.forEach(sharedFolder => { sharedFolder.destroy() })
@@ -281,11 +297,11 @@ class MultiplayerSettingTab extends PluginSettingTab {
       }
       )
 
-    new ButtonComponent(containerEl)
+    /*new ButtonComponent(containerEl)
       .setButtonText("Backup Shared Folders")
       .onClick(e => {
         util.backup((this.app.vault.adapter as FileSystemAdapter).getBasePath() + "/.obsidian/plugins/obsidian-multiplayer") // For now, backup to the plugin folder
-      })
+      })*/
      
      new ButtonComponent(containerEl)
       .setButtonText("Reset Master Password")

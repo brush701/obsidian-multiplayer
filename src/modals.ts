@@ -119,7 +119,6 @@ export class UnshareFolderModal extends Modal {
         this.plugin.saveSettings()
         this.plugin.removeIcon(this.folder.settings.path)
         this.folder.docs.forEach(doc => {
-          doc.close()
           doc.destroy()
         })
         this.folder.destroy()

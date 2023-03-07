@@ -2,6 +2,10 @@
 ![](https://img.shields.io/github/downloads/brush701/obsidian-multiplayer/total) 
 ![](https://img.shields.io/github/license/brush701/obsidian-multiplayer)
 ![](https://img.shields.io/github/manifest-json/v/brush701/obsidian-multiplayer)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/brush701?style=social)](https://github.com/sponsors/brush701)
+[![Paypal](https://img.shields.io/badge/PayPal-brush701-yellow?style=social&logo=paypal)](https://www.paypal.me/brush701)
+
+
 ## ⚠️ Pre-Alpha Software ⚠ ️ 
 This software is in the pre-alpha stage. There is a real risk of data loss, DO NOT USE THIS WITH YOUR REGULAR VAULT!
 

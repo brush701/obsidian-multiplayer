@@ -47,7 +47,9 @@ const usercolors = [
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
-    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers, password: plugin.pwMgr.getPassword(settings.guid)})
+    this._provider = new WebrtcProvider(settings.guid, this.root, {
+                      signaling: settings.signalingServers,
+                      password: plugin.pwMgr.getPassword(settings.guid)})
     this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((guid, path) => {
@@ -196,10 +198,12 @@ export class SharedDoc {
     this._parent = parent
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this._provider = new WebrtcProvider(guid, this.ydoc, {password: parent.plugin.pwMgr.getPassword(guid), signaling: parent.settings.signalingServers})
+    this._provider = new WebrtcProvider(guid, this.ydoc, {
+                      password: parent.plugin.pwMgr.getPassword(guid), 
+                      signaling: parent.settings.signalingServers})
     this.path = path
     this.guid = guid
-    this.connect()
+    this._provider.connect()
   }
 
   /**
@@ -212,34 +216,11 @@ export class SharedDoc {
     })
   }
 
-
-  connect() {
-    if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc) 
-    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {password: this._parent.plugin.pwMgr.getPassword(this.guid), signaling: this._parent.settings.signalingServers})
-    if (!this._provider.connected)
-        this._provider.connect()
-  }
-
-  // This method cleanly disconnects the underlying provider. It is
-  // preferred b/c the getter will auto reconnect
-  close() {
-    this._provider.disconnect()
-    this._provider.destroy()
-    this._provider = null
-
-    this._binding = null
-
-    this._persistence.destroy()
-    this._persistence = undefined
-  } 
-
   destroy() {
-    if (this._provider) {
-      this._provider.destroy()
-    }
-    if (this._persistence) {
-      this._persistence.destroy()
-    }
+    this._provider?.destroy()
+    this._persistence?.destroy()
+    this.ydoc?.destroy()
+    this._parent.docs.delete(this.guid)
   }
 
 }
