@@ -20,7 +20,6 @@ export function makeSharedTypeSettings(
     guid: 'aaaaaaaa-0000-0000-0000-000000000001',
     path: 'shared-folder',
     signalingServers: ['wss://signaling.example.com'],
-    encPw: '',
     ...overrides,
   }
 }
@@ -33,7 +32,6 @@ export function makeMultiplayerSettings(
   return {
     sharedFolders: [],
     username: 'Anonymous',
-    salt: '',
     ...overrides,
   }
 }

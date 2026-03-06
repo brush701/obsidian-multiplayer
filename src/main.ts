@@ -9,7 +9,6 @@ import {
   TFolder,
   MarkdownView,
   FileSystemAdapter,
-  ButtonComponent,
   Notice
 } from "obsidian";
 
@@ -17,20 +16,15 @@ import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
-import * as util from './util'
-
-import { PasswordModal, ResetPasswordModal, SharedFolderModal, UnshareFolderModal } from "./modals";
-import { PasswordManager } from "./pwManager";
+import { SharedFolderModal, UnshareFolderModal } from "./modals";
 
 interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[];
   username: string
-  salt: string
 }
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   sharedFolders: [],
-  salt: "",
   username: "Anonymous"
 };
 
@@ -39,7 +33,6 @@ const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" vie
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
   sharedFolders: SharedFolder[];
-  pwMgr: PasswordManager
   private _extensions: Extension[];
 
   async onload() {
@@ -47,15 +40,7 @@ export default class Multiplayer extends Plugin {
     await this.loadSettings();
     this.sharedFolders = [ ]
     this._extensions = []
-    new PasswordModal(this.app, this, (result: string) => {
-      try {
-      this.pwMgr = new PasswordManager(result, this)
-      this.setup()
-      } catch {
-        new Notice("Incorrect multiplayer password")
-        this.unload()
-      }
-    }).open()
+    this.setup()
   }
 
   setup() {
@@ -77,14 +62,6 @@ export default class Multiplayer extends Plugin {
                   .setTitle('Copy GUID')
                   .onClick(() => navigator.clipboard.writeText(folder.settings.guid).then(() => {
                     new Notice("Copied GUID")
-                  }))
-              })
-
-              menu.addItem((item) => {
-                item
-                  .setTitle('Copy Password')
-                  .onClick(() => navigator.clipboard.writeText(this.pwMgr.getPassword(folder.settings.guid)).then(() => {
-                    new Notice("Copied Password")
                   }))
               })
 
@@ -281,18 +258,5 @@ class MultiplayerSettingTab extends PluginSettingTab {
       }
       )
 
-    new ButtonComponent(containerEl)
-      .setButtonText("Backup Shared Folders")
-      .onClick(e => {
-        util.backup((this.app.vault.adapter as FileSystemAdapter).getBasePath() + "/.obsidian/plugins/obsidian-multiplayer") // For now, backup to the plugin folder
-      })
-     
-     new ButtonComponent(containerEl)
-      .setButtonText("Reset Master Password")
-      .onClick(e => {
-        new ResetPasswordModal(this.app, this.plugin, (result) => {
-          this.plugin.pwMgr.resetPassword(result, this.plugin.sharedFolders.map(e => e.settings.guid))
-        }).open()
-      })
   }
 }
