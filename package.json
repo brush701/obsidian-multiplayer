@@ -13,7 +13,7 @@
 	"author": "Ben Rush",
 	"license": "MIT",
 	"devDependencies": {
-		"@types/node": "^16.11.6",
+		"@types/node": "^20.0.0",
 		"@vitest/coverage-v8": "^1.6.0",
 		"fast-check": "^3.19.0",
 		"vitest": "^1.6.0",
