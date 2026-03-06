@@ -1,0 +1,1202 @@
+#!/usr/bin/env python3
+"""
+Creates GitHub issues from the docs/epics directory.
+Usage: python3 create_issues.py <owner> <repo> <github_token>
+"""
+
+import json
+import sys
+import urllib.request
+import urllib.error
+
+
+def create_issue(owner, repo, token, title, body, labels):
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    data = json.dumps({"title": title, "body": body, "labels": labels}).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            result = json.loads(resp.read())
+            print(f"  Created: #{result['number']} — {result['title']}")
+            return result
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode()
+        print(f"  ERROR creating '{title}': {e.code} {body_text[:200]}")
+        return None
+
+
+ISSUES = [
+    # ─── P1 — Transport Migration ─────────────────────────────────────────────
+    {
+        "title": "P1-S1 — Remove master password infrastructure",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P1 — Transport Migration
+
+**As a** developer,
+**I want** the password management system deleted from the codebase,
+**so that** there is no dead code to maintain and no misleading UI for users.
+
+## Requirements
+
+- `src/pwManager.ts` is deleted entirely.
+- `PasswordModal` is removed from `src/modals.ts`.
+- `ResetPasswordModal` is removed from `src/modals.ts`.
+- The `PasswordModal` invocation at plugin load time (currently `main.ts:50–58`) is removed.
+- The `salt` field is removed from the settings interface.
+- The `encPw` field is removed from `SharedTypeSettings`.
+- The "Reset Master Password" button is removed from `MultiplayerSettingTab`.
+- The "Backup Shared Folders" button is removed from `MultiplayerSettingTab`.
+- All `import` statements referencing removed modules or Node's `crypto` module (used solely for password operations) are removed.
+- The plugin loads successfully without prompting for a password.
+
+## Acceptance Criteria
+
+- [ ] `src/pwManager.ts` does not exist.
+- [ ] No reference to `PasswordModal` or `ResetPasswordModal` exists anywhere in the source tree.
+- [ ] `MultiplayerSettings` interface contains no `salt` field.
+- [ ] `SharedTypeSettings` interface contains no `encPw` field.
+- [ ] Settings tab renders without "Reset Master Password" or "Backup Shared Folders" controls.
+- [ ] Plugin `onload()` completes without displaying any modal or blocking on user input.
+- [ ] TypeScript compilation produces no errors related to removed symbols.
+- [ ] No `import ... from 'crypto'` remains in the codebase (outside of any future intentional use unrelated to passwords).
+""",
+    },
+    {
+        "title": "P1-S2 — Remove WebRTC provider",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P1 — Transport Migration
+
+**As a** developer,
+**I want** the WebRTC signaling infrastructure removed,
+**so that** the dependency on third-party signaling servers and the `y-webrtc` package is eliminated.
+
+## Requirements
+
+- `y-webrtc` is removed from `package.json` and `package-lock.json`.
+- `WebrtcProvider` is no longer instantiated anywhere in the source tree.
+- `signalingServers` is removed from `SharedTypeSettings`.
+- The signaling server URL setting is removed from `MultiplayerSettingTab`.
+- Existing `SharedTypeSettings` entries that contain `signalingServers` are migrated on plugin load: the field is stripped and the entry is saved back without it (non-destructive; the room remains with its `guid` and `path` intact).
+
+## Acceptance Criteria
+
+- [ ] `y-webrtc` does not appear in `package.json` `dependencies` or `devDependencies`.
+- [ ] `yarn install` / `npm install` completes without installing `y-webrtc`.
+- [ ] No `import` or `require` of `y-webrtc` exists in the source tree.
+- [ ] `SharedTypeSettings` interface contains no `signalingServers` field.
+- [ ] Settings tab renders without any signaling server URL input.
+- [ ] On plugin load, any stored settings entry with a `signalingServers` key is rewritten without that key; all other fields (`guid`, `path`, `name`) are preserved.
+- [ ] TypeScript compilation produces no errors related to removed symbols.
+""",
+    },
+    {
+        "title": "P1-S3 — Update settings schema",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P1 — Transport Migration
+
+**As a** developer,
+**I want** the settings interfaces updated to reflect the new server-centric model,
+**so that** all code works against a consistent, minimal data shape.
+
+## Requirements
+
+The final `MultiplayerSettings` interface is:
+
+```typescript
+interface MultiplayerSettings {
+  serverUrl: string;
+  username: string;
+  sharedFolders: SharedTypeSettings[];
+}
+
+interface SharedTypeSettings {
+  guid: string;
+  path: string;
+  name: string;
+}
+```
+
+- `DEFAULT_SETTINGS` is updated to match (empty `sharedFolders`, empty `serverUrl`, empty `username`).
+- Schema migration runs on plugin load before any other initialisation that reads settings. Migration is idempotent (running it twice produces the same result).
+- Fields present in stored settings that are not in the new schema (`salt`, `encPw`, `signalingServers`) are dropped during migration.
+- Fields present in the new schema that are missing from stored settings are initialised to their defaults.
+
+## Acceptance Criteria
+
+- [ ] `MultiplayerSettings` matches the interface above exactly (no extra fields).
+- [ ] `SharedTypeSettings` matches the interface above exactly (no extra fields).
+- [ ] `DEFAULT_SETTINGS` satisfies `MultiplayerSettings` with no TypeScript errors.
+- [ ] Given stored settings `{ salt: "x", sharedFolders: [{ guid: "g", path: "p", encPw: "e", signalingServers: ["wss://..."] }] }`, after migration the stored value is `{ serverUrl: "", username: "", sharedFolders: [{ guid: "g", path: "p", name: "" }] }`.
+- [ ] Running migration a second time on already-migrated settings produces identical output.
+- [ ] TypeScript compilation produces no errors related to settings types.
+""",
+    },
+    {
+        "title": "P1-S4 — Integrate y-websocket provider",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P1 — Transport Migration
+
+**As a** developer,
+**I want** `SharedFolder` and `SharedDoc` to use `WebsocketProvider` from `y-websocket`,
+**so that** document synchronisation works over WebSocket rather than WebRTC.
+
+## Requirements
+
+- `y-websocket` is added to `package.json` as a dependency.
+- `WebsocketProvider` from `y-websocket` replaces `WebrtcProvider` in both `SharedFolder` and `SharedDoc`.
+- The WebSocket URL is constructed as `${settings.serverUrl}/room/${guid}` where `serverUrl` comes from plugin settings.
+- The `docName` parameter passed to `WebsocketProvider` is the room `guid`.
+- The provider is created with `{ connect: false }` initially; `provider.connect()` is called explicitly after the access token is attached (leave a clearly marked `// TODO(P2): attach token` comment in place of the connect call, and call `provider.connect()` unconditionally for now so the story is independently testable against an unauthenticated local server).
+- Provider cleanup (`provider.destroy()`) is called in the same lifecycle location as the former `WebrtcProvider` cleanup.
+- `awareness` on the new provider is used for cursor/user presence in the same way as before.
+
+## Acceptance Criteria
+
+- [ ] `y-websocket` appears in `package.json` `dependencies`.
+- [ ] No `WebrtcProvider` instantiation exists in the source tree.
+- [ ] `SharedFolder` constructs a `WebsocketProvider` with URL `${plugin.settings.serverUrl}/room/${guid}`.
+- [ ] `SharedDoc` constructs a `WebsocketProvider` with URL `${plugin.settings.serverUrl}/room/${guid}`.
+- [ ] Both providers use the folder/doc `guid` as the `docName`.
+- [ ] `provider.destroy()` is called when the folder/doc is unloaded.
+- [ ] Given a running stock `y-websocket` server at the configured `serverUrl`, two plugin instances open to the same room converge on the same document state within 2 seconds of an edit.
+- [ ] A `// TODO(P2): attach token` comment marks the location where bearer token injection will be added.
+- [ ] TypeScript compilation produces no errors.
+""",
+    },
+    {
+        "title": "P1-S5 — Remove context menu legacy items",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P1 — Transport Migration
+
+**As a** user,
+**I want** the "Copy GUID" and "Copy Password" context menu items removed,
+**so that** the menu only contains actions that are meaningful in the new model.
+
+## Requirements
+
+- "Copy GUID" is removed from the shared folder right-click context menu.
+- "Copy Password" is removed from the shared folder right-click context menu.
+- No other context menu items are removed or reordered by this story (changes to "Invite" and "Members" items are P3).
+
+## Acceptance Criteria
+
+- [ ] Right-clicking a shared folder in the file explorer does not show "Copy GUID".
+- [ ] Right-clicking a shared folder in the file explorer does not show "Copy Password".
+- [ ] All other existing context menu items remain present and functional.
+""",
+    },
+    # ─── P2 — Authentication ──────────────────────────────────────────────────
+    {
+        "title": "P2-S1 — AuthManager core",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** developer,
+**I want** a single `AuthManager` class that owns all token lifecycle logic,
+**so that** every other part of the plugin can get a valid access token without knowing the details of OAuth or token storage.
+
+## Requirements
+
+`src/auth.ts` exports a class `AuthManager` with the following public interface:
+
+```typescript
+class AuthManager {
+  constructor(app: App, settings: MultiplayerSettings)
+
+  /** Start PKCE sign-in. Opens browser; resolves when callback received. */
+  signIn(): Promise<void>
+
+  /** Clear all stored tokens and fire 'auth-changed'. */
+  signOut(): Promise<void>
+
+  /**
+   * Return a currently valid access token, refreshing silently if needed.
+   * Returns null if not authenticated.
+   */
+  getAccessToken(): Promise<string | null>
+
+  /** True if tokens are stored and not known to be permanently invalid. */
+  readonly isAuthenticated: boolean
+
+  /** Email and display name from the last successful token exchange, or null. */
+  readonly userInfo: { email: string; name: string } | null
+
+  /** Subscribe to auth state changes (sign-in, sign-out, token refresh failure). */
+  on(event: 'auth-changed', handler: () => void): void
+  off(event: 'auth-changed', handler: () => void): void
+}
+```
+
+- `AuthManager` is instantiated once in `main.ts` and passed to components that need it.
+- `AuthManager` reads its `serverUrl` from `settings.serverUrl`. If `serverUrl` changes, the existing instance is replaced.
+
+## Acceptance Criteria
+
+- [ ] `src/auth.ts` exists and exports `AuthManager`.
+- [ ] `AuthManager` satisfies the interface above with no TypeScript errors.
+- [ ] `isAuthenticated` returns `false` on a freshly instantiated manager with no stored tokens.
+- [ ] `getAccessToken()` returns `null` when not authenticated.
+- [ ] `on('auth-changed', handler)` and `off('auth-changed', handler)` correctly add and remove listeners.
+- [ ] `AuthManager` is instantiated in `main.ts` and accessible to plugin components.
+""",
+    },
+    {
+        "title": "P2-S2 — PKCE sign-in flow",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** to click "Sign in" in the settings tab and complete authentication in my browser,
+**so that** the plugin can act on my behalf without me entering credentials into Obsidian.
+
+## Requirements
+
+`AuthManager.signIn()`:
+
+1. Generates a cryptographically random `code_verifier` (64 bytes, base64url encoded) and `state` nonce (32 bytes, base64url encoded) using the Web Crypto API.
+2. Computes `code_challenge = base64url(sha256(code_verifier))`.
+3. Stores `code_verifier` and `state` in memory (not persisted).
+4. Opens the system browser to:
+   ```
+   {serverUrl}/auth/authorize
+     ?client_id=obsidian-multiplayer
+     &redirect_uri=obsidian://multiplayer/callback
+     &response_type=code
+     &code_challenge={code_challenge}
+     &code_challenge_method=S256
+     &state={state}
+   ```
+5. A protocol handler registered under `obsidian://multiplayer/callback` receives the redirect from the browser.
+6. The handler validates that `state` in the callback URL matches the stored nonce. If not, the flow is aborted and an error notice is shown.
+7. The handler POSTs to `{serverUrl}/auth/token` with `grant_type`, `code`, `code_verifier`, `client_id`, and `redirect_uri`.
+8. On success, the response `{ access_token, refresh_token, expires_in, user: { email, name } }` is stored via `TokenStore` (P2-S3).
+9. `isAuthenticated` becomes `true`; `userInfo` is populated; `'auth-changed'` fires.
+10. On network error or non-2xx response, a notice is shown: "Sign-in failed — try again."
+11. In-memory `code_verifier` and `state` are cleared regardless of outcome.
+
+- The protocol handler is registered in `main.ts` via `this.registerObsidianProtocolHandler('multiplayer/callback', ...)` and unregistered on plugin unload.
+- Only one sign-in flow can be in progress at a time. A second call to `signIn()` while one is pending reuses the existing pending promise.
+
+## Acceptance Criteria
+
+- [ ] `signIn()` opens the system browser to a URL matching the template above.
+- [ ] The constructed URL contains `code_challenge_method=S256`.
+- [ ] The `code_challenge` is the base64url-encoded SHA-256 hash of the `code_verifier`.
+- [ ] `obsidian://multiplayer/callback` is registered as a protocol handler on plugin load.
+- [ ] Given a callback URL with an incorrect `state`, the flow is aborted and a notice is shown; `isAuthenticated` remains `false`.
+- [ ] Given a callback URL with the correct `state` and `code`, a POST is made to `{serverUrl}/auth/token` with the body described above.
+- [ ] After a successful token response, `isAuthenticated` is `true` and `userInfo` reflects the returned `email` and `name`.
+- [ ] After a successful token response, `'auth-changed'` fires exactly once.
+- [ ] Given a non-2xx token response, a "Sign-in failed" notice is shown; `isAuthenticated` remains `false`.
+- [ ] A second call to `signIn()` while the first is pending returns the same promise (no duplicate browser windows).
+- [ ] `code_verifier` and `state` are not readable on `AuthManager` after the flow completes or fails.
+""",
+    },
+    {
+        "title": "P2-S3 — Token storage (SecretStorage)",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** my OAuth tokens stored securely and separately from synced settings,
+**so that** tokens are not exposed via Obsidian Sync or in `data.json`.
+
+## Requirements
+
+A `TokenStore` class (internal to `src/auth.ts` or its own `src/tokenStore.ts`) handles all token persistence:
+
+```typescript
+interface StoredTokens {
+  accessToken: string
+  refreshToken: string
+  expiresAt: string   // ISO 8601
+  email: string
+  name: string
+}
+
+class TokenStore {
+  async save(tokens: StoredTokens): Promise<void>
+  async load(): Promise<StoredTokens | null>
+  async clear(): Promise<void>
+}
+```
+
+Storage keys:
+
+| Key | Value |
+|---|---|
+| `mp-access-token` | access token string |
+| `mp-refresh-token` | refresh token string |
+| `mp-token-expiry` | ISO 8601 expiry timestamp |
+| `mp-user-email` | user email string |
+| `mp-user-name` | user display name string |
+
+- Storage uses `this.app.vault.adapter.store` (Obsidian's `LocalForage`-backed SecretStorage).
+- `save()` writes all five keys atomically (best-effort; individual `setItem` calls are acceptable if Obsidian's API does not provide a transaction).
+- `load()` returns `null` if any required key is missing.
+- `clear()` removes all five keys.
+- `TokenStore` is not exported from the plugin's public surface.
+
+## Acceptance Criteria
+
+- [ ] After `save(tokens)`, `load()` returns a `StoredTokens` object equal to the saved value.
+- [ ] After `clear()`, `load()` returns `null`.
+- [ ] After `save()` followed by `clear()`, `load()` returns `null`.
+- [ ] `load()` returns `null` if only a subset of the keys exist in storage.
+- [ ] None of the stored keys appear in `plugin.settings` or `data.json`.
+- [ ] `TokenStore` does not export its class or interface from the plugin module boundary.
+""",
+    },
+    {
+        "title": "P2-S4 — Silent token refresh",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** my session to silently renew before it expires,
+**so that** my collaboration session is never interrupted by an authentication timeout.
+
+## Requirements
+
+`AuthManager.getAccessToken()`:
+
+1. Loads tokens from `TokenStore`.
+2. If no tokens, returns `null`.
+3. If the access token expiry is more than 60 seconds in the future, returns the access token directly.
+4. If the access token is within 60 seconds of expiry (or already expired), attempts a refresh:
+   - POSTs to `{serverUrl}/auth/token` with `grant_type: refresh_token`, `refresh_token`, and `client_id`.
+   - On success: saves new tokens, returns new access token.
+   - On non-2xx or network failure: calls `signOut()`, shows notice "Session expired — please sign in again", returns `null`.
+5. Concurrent calls during an in-progress refresh await the same refresh promise (no duplicate refresh requests).
+
+## Acceptance Criteria
+
+- [ ] Given a token with expiry 120 seconds in the future, `getAccessToken()` returns the stored token without making a network request.
+- [ ] Given a token with expiry 30 seconds in the future, `getAccessToken()` sends a refresh POST before returning.
+- [ ] Given a successful refresh response, `getAccessToken()` returns the new access token and `TokenStore` contains the updated tokens.
+- [ ] Given a 401 refresh response, `getAccessToken()` returns `null`, `isAuthenticated` is `false`, and a "Session expired" notice is shown.
+- [ ] Given two concurrent `getAccessToken()` calls both needing a refresh, exactly one POST is made to the token endpoint.
+- [ ] After a refresh failure, `'auth-changed'` fires exactly once.
+""",
+    },
+    {
+        "title": "P2-S5 — Sign-out",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** to be able to sign out from the settings tab,
+**so that** I can switch accounts or revoke the plugin's access.
+
+## Requirements
+
+`AuthManager.signOut()`:
+
+1. Calls `TokenStore.clear()`.
+2. Optionally hits `GET {serverUrl}/auth/logout` (fire-and-forget; failure is silently ignored).
+3. Sets `isAuthenticated = false` and `userInfo = null`.
+4. Fires `'auth-changed'`.
+
+The settings tab "Sign Out" button calls `plugin.auth.signOut()`. After sign-out, open WebSocket connections are closed (providers call `provider.disconnect()`).
+
+## Acceptance Criteria
+
+- [ ] After `signOut()`, `isAuthenticated` is `false`.
+- [ ] After `signOut()`, `userInfo` is `null`.
+- [ ] After `signOut()`, `getAccessToken()` returns `null`.
+- [ ] After `signOut()`, `TokenStore.load()` returns `null`.
+- [ ] After `signOut()`, `'auth-changed'` fires exactly once.
+- [ ] A network failure hitting the logout endpoint does not throw or prevent the local sign-out from completing.
+- [ ] Clicking "Sign Out" in the settings tab results in all active `WebsocketProvider` instances calling `provider.disconnect()`.
+""",
+    },
+    {
+        "title": "P2-S6 — Token injection into WebSocket connections",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** developer,
+**I want** the access token passed as a query parameter on WebSocket connections,
+**so that** the server can authenticate the connection.
+
+## Requirements
+
+- The `// TODO(P2): attach token` placeholder from P1-S4 is replaced.
+- Before calling `provider.connect()`, `AuthManager.getAccessToken()` is awaited.
+- If the result is `null`, `provider.connect()` is not called; a notice is shown: "Not signed in — cannot connect to room."
+- If the result is a token, it is set via constructing the URL with `?token={accessToken}`. Token is passed as a URL query parameter (`token`), not as a WebSocket subprotocol.
+- When the WebSocket is closed with code 4001 (Unauthorized), `AuthManager.signOut()` is called and a notice is shown: "Session expired — please sign in again."
+- When the WebSocket is closed with code 4003 (Forbidden), a notice is shown: "Access denied to [room name]." The room is removed from `settings.sharedFolders`.
+- When the WebSocket is closed with code 4004 (Room not found), a notice is shown: "Room '[name]' no longer exists." The room is removed from `settings.sharedFolders`.
+
+## Acceptance Criteria
+
+- [ ] `WebsocketProvider` is constructed with `?token=<accessToken>` in the URL.
+- [ ] If `getAccessToken()` returns `null`, `provider.connect()` is not called.
+- [ ] If `getAccessToken()` returns `null`, a "Not signed in" notice is shown.
+- [ ] A WS close with code 4001 triggers `signOut()` and shows a "Session expired" notice.
+- [ ] A WS close with code 4003 removes the room from settings and shows an "Access denied" notice.
+- [ ] A WS close with code 4004 removes the room from settings and shows a "no longer exists" notice.
+""",
+    },
+    {
+        "title": "P2-S7 — Authentication UI in settings tab",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** the settings tab to show my sign-in status and provide sign-in/out controls,
+**so that** I can manage my session without leaving Obsidian.
+
+## Requirements
+
+The settings tab `MultiplayerSettingTab` is updated:
+
+**Server section:**
+```
+Server URL   [______________________________]
+             (e.g. https://multiplayer.company.com)
+```
+
+- Changing the server URL does not immediately trigger sign-in; it updates `settings.serverUrl`.
+
+**Auth section (shown below server URL):**
+
+When `isAuthenticated` is `true`:
+```
+● Signed in as alice@company.com     [Sign Out]
+```
+
+When `isAuthenticated` is `false`:
+```
+○ Not signed in                      [Sign In]
+```
+
+- The section re-renders whenever `'auth-changed'` fires.
+- "Sign In" is disabled (greyed out) if `settings.serverUrl` is empty.
+- "Sign Out" calls `plugin.auth.signOut()`.
+- "Sign In" calls `plugin.auth.signIn()`. While sign-in is in progress, the button is replaced with "Signing in…" and is disabled.
+
+## Acceptance Criteria
+
+- [ ] Settings tab renders a "Server URL" text input whose value reflects `settings.serverUrl`.
+- [ ] Changing the server URL input updates `settings.serverUrl` and saves settings.
+- [ ] When `isAuthenticated` is `false`, the settings tab shows "Not signed in" and a "Sign In" button.
+- [ ] When `isAuthenticated` is `true`, the settings tab shows `● Signed in as {email}` and a "Sign Out" button.
+- [ ] "Sign In" button is disabled when `settings.serverUrl` is empty.
+- [ ] Clicking "Sign In" with a non-empty `serverUrl` calls `AuthManager.signIn()`.
+- [ ] Clicking "Sign Out" calls `AuthManager.signOut()`.
+- [ ] The auth section updates without requiring a settings tab close/reopen after sign-in or sign-out.
+- [ ] While `signIn()` is pending, the button label is "Signing in…" and the button is disabled.
+""",
+    },
+    {
+        "title": "P2-S8 — Connection status bar item",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P2 — Authentication
+
+**As a** user,
+**I want** a status bar item showing the current sync state,
+**so that** I can see at a glance whether the plugin is connected and healthy.
+
+## Requirements
+
+A status bar item is added in `main.ts` via `this.addStatusBarItem()`.
+
+| Condition | Display text |
+|---|---|
+| Not signed in | `Multiplayer: not signed in` |
+| Signed in, all providers connected and synced | `● Multiplayer` |
+| Any provider syncing (initial state transfer in progress) | `⟳ Multiplayer` |
+| Any provider disconnected / reconnecting (but not auth error) | `○ Multiplayer` |
+| Auth error (after 4001 or refresh failure) | `⚠ Multiplayer: sign in again` |
+
+- Clicking the status bar item when in "sign in again" state opens the settings tab.
+- Clicking in any other state has no action (or optionally opens settings; either is acceptable).
+- The status bar item is removed on plugin unload.
+
+## Acceptance Criteria
+
+- [ ] A status bar item is present after plugin load.
+- [ ] Status bar displays "Multiplayer: not signed in" when `isAuthenticated` is `false`.
+- [ ] Status bar displays "● Multiplayer" when signed in and all providers report `connected = true` and `synced = true`.
+- [ ] Status bar displays "⟳ Multiplayer" when any provider has `synced = false` (initial sync in progress).
+- [ ] Status bar displays "○ Multiplayer" when any provider has `connected = false` (reconnecting) but there is no auth error.
+- [ ] Status bar displays "⚠ Multiplayer: sign in again" after a 4001 close or refresh failure.
+- [ ] Clicking the status bar item in the "sign in again" state opens the settings tab.
+- [ ] Status bar item is removed on plugin unload.
+""",
+    },
+    # ─── P3 — Room Management ─────────────────────────────────────────────────
+    {
+        "title": "P3-S1 — API client",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** developer,
+**I want** a typed API client that wraps all HTTP calls to the server,
+**so that** individual UI components are not responsible for fetch boilerplate or error handling.
+
+## Requirements
+
+`src/api.ts` exports a class `ApiClient` with the following public interface:
+
+```typescript
+class ApiClient {
+  constructor(settings: MultiplayerSettings, auth: AuthManager)
+
+  /** List rooms the authenticated user is a member of. */
+  listRooms(): Promise<RoomSummary[]>
+
+  /** Create a new room. Returns the created room. */
+  createRoom(name: string): Promise<RoomDetail>
+
+  /** Claim an invite token and return the joined room. */
+  joinRoom(token: string): Promise<RoomDetail>
+
+  /** Get members and metadata for a specific room. */
+  getRoom(guid: string): Promise<RoomDetail>
+
+  /** Get the authenticated user's role in a specific room. */
+  getMyRole(guid: string): Promise<RoomRole>
+
+  /** Create an invite link for a room. */
+  createInvite(guid: string, role: RoomRole, expiresIn: InviteExpiry): Promise<string>
+}
+
+type RoomRole = 'OWNER' | 'EDITOR' | 'VIEWER'
+type InviteExpiry = '1d' | '7d' | '30d'
+```
+
+- All methods prepend `settings.serverUrl` to the path.
+- All methods call `auth.getAccessToken()` and include the result as `Authorization: Bearer <token>`.
+- If `getAccessToken()` returns `null`, the method throws an `AuthRequiredError`.
+- Non-2xx responses throw an `ApiError` with the HTTP status and a message parsed from the response body if possible.
+- `ApiClient` is instantiated once in `main.ts` alongside `AuthManager`.
+
+## Acceptance Criteria
+
+- [ ] `src/api.ts` exists and exports `ApiClient`, `RoomRole`, `InviteExpiry`, `RoomSummary`, `RoomDetail`, `RoomMember`.
+- [ ] `ApiClient` satisfies the interface above with no TypeScript errors.
+- [ ] Every method includes an `Authorization: Bearer <token>` header on the HTTP request.
+- [ ] If `auth.getAccessToken()` returns `null`, the method throws `AuthRequiredError` without making a network call.
+- [ ] A non-2xx response causes the method to throw `ApiError`.
+- [ ] TypeScript compilation produces no errors.
+""",
+    },
+    {
+        "title": "P3-S2 — Rework SharedFolderModal: Create tab",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** to create a new shared room from a dialog in Obsidian,
+**so that** I can start collaborating on a folder without leaving the app.
+
+## Requirements
+
+`SharedFolderModal` is redesigned with two tabs: **Create** and **Join** (see P3-S3 for Join).
+
+**Create tab layout:**
+```
+Room name: [____________________________]
+           (defaults to the folder's name if opened from a folder context menu)
+
+           [ Create Room ]
+```
+
+Behaviour:
+
+1. User enters a room name (required; non-empty).
+2. Clicking "Create Room" calls `ApiClient.createRoom(name)`.
+3. While the request is in flight, the button is disabled and shows "Creating…".
+4. On success: the returned `{ guid, name }` is used to create a new `SharedFolder` locally with the active folder path. Settings are saved.
+5. The modal closes.
+6. On `AuthRequiredError`: show notice "Sign in first." Modal remains open.
+7. On `ApiError`: show notice "Could not create room: {message}." Modal remains open.
+8. Room name input has focus when the modal opens.
+
+## Acceptance Criteria
+
+- [ ] `SharedFolderModal` renders a tab bar with "Create" and "Join" tabs.
+- [ ] Create tab shows a room name input and a "Create Room" button.
+- [ ] Room name input is pre-filled with the folder name when opened from a folder's context menu.
+- [ ] "Create Room" is disabled when the room name input is empty.
+- [ ] Clicking "Create Room" calls `ApiClient.createRoom(name)`.
+- [ ] While the request is in flight, the button is disabled and shows "Creating…".
+- [ ] On success, a new `SharedTypeSettings` entry is created with the returned `guid` and `name`, and the configured folder path.
+- [ ] On success, `plugin.settings.sharedFolders` contains the new entry and settings are saved.
+- [ ] On success, the modal closes.
+- [ ] On `AuthRequiredError`, a notice is shown and the modal remains open.
+- [ ] On `ApiError`, a notice is shown with the error message and the modal remains open.
+- [ ] The room name input has focus when the modal opens on the Create tab.
+""",
+    },
+    {
+        "title": "P3-S3 — Rework SharedFolderModal: Join tab",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** to join a room by pasting an invite link or token,
+**so that** I can collaborate without needing the plugin to handle a deep link automatically.
+
+## Requirements
+
+**Join tab layout:**
+```
+Invite link or code: [____________________________]
+
+                     [ Join Room ]
+```
+
+Behaviour:
+
+1. User pastes an invite link (e.g. `https://server/join?token=<uuid>`) or a raw token UUID.
+2. The plugin extracts the token: if the input is a URL, it parses the `token` query parameter; otherwise it uses the raw input string.
+3. Clicking "Join Room" calls `ApiClient.joinRoom(token)`.
+4. While in flight, button is disabled and shows "Joining…".
+5. On success: a folder picker is shown. User selects a local folder. A `SharedFolder` is created at that path with the returned `{ guid, name }`. Settings are saved.
+6. The modal closes after folder selection.
+7. On `AuthRequiredError`: show notice "Sign in first." Modal remains open.
+8. On `ApiError` with status 404 or 410: show notice "Invite link is invalid or has expired." Modal remains open.
+9. On other `ApiError`: show notice "Could not join room: {message}." Modal remains open.
+
+## Acceptance Criteria
+
+- [ ] Join tab shows an invite link input and a "Join Room" button.
+- [ ] Given input `https://server/join?token=abc-123`, the token extracted and sent is `abc-123`.
+- [ ] Given input `abc-123` (no URL), the token sent is `abc-123`.
+- [ ] "Join Room" is disabled when the input is empty.
+- [ ] Clicking "Join Room" calls `ApiClient.joinRoom(token)`.
+- [ ] While the request is in flight, the button is disabled and shows "Joining…".
+- [ ] On success, a folder picker is displayed.
+- [ ] After folder selection, a `SharedTypeSettings` entry is created with the returned `guid` and `name`.
+- [ ] On success, the modal closes.
+- [ ] On `AuthRequiredError`, a notice is shown and the modal remains open.
+- [ ] On a 404 or 410 `ApiError`, the "invalid or expired" notice is shown and the modal remains open.
+- [ ] On another `ApiError`, a generic notice is shown and the modal remains open.
+""",
+    },
+    {
+        "title": "P3-S4 — Protocol handler: auto-join from browser",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** clicking "Open in Obsidian" in the browser invite claim page to automatically prompt me to add the room to my vault,
+**so that** I don't have to copy-paste anything.
+
+## Requirements
+
+A protocol handler for `obsidian://multiplayer/join` is registered in `main.ts`:
+
+```
+obsidian://multiplayer/join?guid={guid}&name={name}&server={serverUrl}
+```
+
+On receipt:
+
+1. If `server` does not match `settings.serverUrl`, show notice "This invite is for a different server ({server}). Update your server URL in settings." Take no further action.
+2. If the `guid` is already in `settings.sharedFolders`, show notice "You already have '[name]' in your vault." Take no further action.
+3. If not authenticated, show notice "Sign in to Multiplayer before opening a room link." Take no further action.
+4. Otherwise, open a folder picker. After selection, create a `SharedFolder` with the given `guid` and `name`. Save settings.
+5. Show notice "Room '[name]' added to your vault."
+
+## Acceptance Criteria
+
+- [ ] `obsidian://multiplayer/join` is registered as a protocol handler on plugin load.
+- [ ] Given a `server` parameter that does not match `settings.serverUrl`, a mismatch notice is shown and no folder picker opens.
+- [ ] Given a `guid` that is already in `settings.sharedFolders`, a "already have" notice is shown and no folder picker opens.
+- [ ] Given `isAuthenticated = false`, a "sign in first" notice is shown and no folder picker opens.
+- [ ] Given valid parameters and authentication, a folder picker is displayed.
+- [ ] After folder selection, `settings.sharedFolders` contains a new entry with the given `guid` and `name`.
+- [ ] After folder selection, a "Room added" notice is shown.
+- [ ] The handler is unregistered on plugin unload.
+""",
+    },
+    {
+        "title": "P3-S5 — InviteModal",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** to generate and copy an invite link from Obsidian,
+**so that** I can share a room with a colleague without opening a browser.
+
+## Requirements
+
+`InviteModal` is a new modal opened from the "Invite to [Room Name]" context menu item.
+
+**Layout:**
+```
+┌─ Invite to "Q4 Planning" ─────────────────┐
+│                                            │
+│  Role:    ● Editor   ○ Viewer             │
+│                                            │
+│  Expires: [7 days  ▾]                     │
+│           1 day / 7 days / 30 days        │
+│                                            │
+│  [ Copy Invite Link ]                     │
+└────────────────────────────────────────────┘
+```
+
+Behaviour:
+
+1. Default role: Editor. Default expiry: 7 days.
+2. Clicking "Copy Invite Link" calls `ApiClient.createInvite(guid, role, expiresIn)`.
+3. While in flight, button is disabled and shows "Generating…".
+4. On success, the returned invite URL is written to the clipboard via `navigator.clipboard.writeText()`. A notice is shown: "Invite link copied."
+5. The modal remains open (user may generate additional invites with different settings).
+6. On `ApiError`, show notice "Could not create invite: {message}."
+7. `InviteModal` is only accessible to users with role `OWNER` or `EDITOR` for the room. If role is `VIEWER`, the "Invite to…" context menu item is not shown.
+
+## Acceptance Criteria
+
+- [ ] `InviteModal` renders with role radio buttons (Editor / Viewer) and expiry dropdown (1 day / 7 days / 30 days).
+- [ ] Default role is Editor; default expiry is 7 days.
+- [ ] Clicking "Copy Invite Link" calls `ApiClient.createInvite` with the selected role and expiry.
+- [ ] While in flight, the button is disabled and shows "Generating…".
+- [ ] On success, the invite URL is written to the clipboard.
+- [ ] On success, a "Invite link copied" notice is shown.
+- [ ] The modal remains open after a successful link generation.
+- [ ] On `ApiError`, a notice is shown with the error message.
+- [ ] The "Invite to [Room Name]" context menu item is not shown to users whose local cached role for the room is `VIEWER`.
+""",
+    },
+    {
+        "title": "P3-S6 — MembersModal",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** to see who is in a room from Obsidian,
+**so that** I can understand current membership without opening the admin panel.
+
+## Requirements
+
+`MembersModal` is a new read-only modal opened from the "Room members" context menu item.
+
+**Layout:**
+```
+┌─ Q4 Planning — Members ─────────────────────┐
+│                                              │
+│  alice@company.com    Owner                 │
+│  bob@company.com      Editor                │
+│  carol@company.com    Viewer                │
+│                                             │
+│  [ Invite someone new ]                     │
+│  [ Manage in admin panel ↗ ]               │
+└─────────────────────────────────────────────┘
+```
+
+Behaviour:
+
+1. On open, calls `ApiClient.getRoom(guid)` to fetch current members.
+2. While loading, shows a spinner/loading text.
+3. Members are listed as `{email}  {role}` rows, sorted: OWNER first, then EDITOR, then VIEWER; alphabetically within each role.
+4. "Invite someone new" opens `InviteModal` for the same room (replacing the members modal).
+5. "Manage in admin panel ↗" opens the system browser to `{serverUrl}/admin/rooms/{guid}`.
+6. "Invite someone new" is not shown to VIEWERs.
+7. On `ApiError`, shows error message inline; modal remains open.
+
+## Acceptance Criteria
+
+- [ ] `MembersModal` opens and calls `ApiClient.getRoom(guid)` immediately.
+- [ ] While loading, a loading indicator is shown.
+- [ ] Members are displayed with email and role.
+- [ ] Members are sorted OWNER → EDITOR → VIEWER, alphabetically within each group.
+- [ ] "Invite someone new" button is present for OWNER and EDITOR roles.
+- [ ] "Invite someone new" button is absent for VIEWER role.
+- [ ] Clicking "Invite someone new" opens `InviteModal`.
+- [ ] "Manage in admin panel ↗" opens the system browser to the admin URL.
+- [ ] On `ApiError`, an error message is shown inline in the modal.
+""",
+    },
+    {
+        "title": "P3-S7 — Context menu updates",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** the right-click context menu on shared folders to reflect the new sharing model,
+**so that** the available actions are relevant and consistent with my role.
+
+## Requirements
+
+Right-click context menu on a shared folder entry in the file explorer:
+
+```
+Delete Multiplayer Shared Folder
+─────────────────────────────────
+Invite to [Room Name]       (hidden for VIEWER role)
+Room members
+```
+
+- "Copy GUID" and "Copy Password" are removed (completed in P1-S5).
+- "Invite to [Room Name]" opens `InviteModal`.
+- "Room members" opens `MembersModal`.
+- The locally cached role (from the most recent `ApiClient.getMyRole()` call, stored on `SharedFolder`) determines which items are shown. If no role is cached yet (e.g. before first connect), all items are shown and the server will enforce the real permission.
+
+## Acceptance Criteria
+
+- [ ] Right-click on a shared folder shows "Delete Multiplayer Shared Folder", "Invite to [Room Name]", and "Room members".
+- [ ] "Invite to [Room Name]" is not shown when the cached role is `VIEWER`.
+- [ ] Clicking "Invite to [Room Name]" opens `InviteModal` scoped to that room.
+- [ ] Clicking "Room members" opens `MembersModal` scoped to that room.
+- [ ] "Copy GUID" does not appear.
+- [ ] "Copy Password" does not appear.
+""",
+    },
+    {
+        "title": "P3-S8 — Available rooms list in settings tab",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P3 — Room Management
+
+**As a** user,
+**I want** to see rooms I have access to but haven't added to my vault,
+**so that** I can easily add them without needing an invite link.
+
+## Requirements
+
+The settings tab includes an "Available rooms" section below the Collaboration section:
+
+```
+Available rooms
+
+┌──────────────────────────────────────────────────────┐
+│  Q4 Planning      Editor    [ Add to vault ]         │
+│  Engineering Hub  Editor    [ Add to vault ]         │
+│  Board Docs       Viewer    [ Add to vault ]         │
+└──────────────────────────────────────────────────────┘
+```
+
+Behaviour:
+
+1. The list is populated by `ApiClient.listRooms()`, called when the settings tab is opened (if authenticated).
+2. Rooms already present in `settings.sharedFolders` (matched by `guid`) are excluded from the list.
+3. If `isAuthenticated` is `false`, the section shows "Sign in to see your available rooms."
+4. While loading, shows "Loading rooms…".
+5. On `ApiError`, shows "Could not load rooms."
+6. "Add to vault" opens a folder picker. After selection, creates a `SharedFolder` with the room's `guid` and `name`. Saves settings. Removes the entry from the available list.
+7. If there are no available rooms (all are already in vault, or user has none), the section shows "No additional rooms available."
+
+## Acceptance Criteria
+
+- [ ] Settings tab calls `ApiClient.listRooms()` when opened and `isAuthenticated` is `true`.
+- [ ] Rooms already in `settings.sharedFolders` are not shown in the available list.
+- [ ] Each listed room shows name, role, and "Add to vault" button.
+- [ ] Clicking "Add to vault" opens a folder picker.
+- [ ] After folder selection, the room is added to `settings.sharedFolders` and the entry disappears from the list.
+- [ ] When `isAuthenticated` is `false`, a "Sign in" message is shown instead of the list.
+- [ ] While `listRooms()` is in flight, a loading message is shown.
+- [ ] When `listRooms()` fails, an error message is shown.
+- [ ] When the list is empty, "No additional rooms available" is shown.
+""",
+    },
+    # ─── P4 — Permissions Enforcement ────────────────────────────────────────
+    {
+        "title": "P4-S1 — Fetch and cache room role",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P4 — Permissions Enforcement
+
+**As a** developer,
+**I want** each `SharedFolder` and `SharedDoc` to know the user's role,
+**so that** downstream code can make role-based decisions without additional API calls.
+
+## Requirements
+
+- `SharedFolder` gains a property `role: RoomRole | null` (initially `null`).
+- After `provider.connect()` is called and the WebSocket connection is established (`provider.on('status', ...)` fires with `{ status: 'connected' }`), `ApiClient.getMyRole(guid)` is called.
+- The returned role is stored on `SharedFolder.role` and also propagated to all `SharedDoc` instances belonging to that folder.
+- `SharedDoc` gains a property `role: RoomRole | null` (initially `null`), set from the parent `SharedFolder`.
+- If `getMyRole()` fails (network error or non-2xx), `role` remains `null`; the failure is logged but does not surface to the user.
+- `role` is re-fetched after a reconnect (every time `status` transitions to `'connected'`).
+
+## Acceptance Criteria
+
+- [ ] `SharedFolder` has a `role` property of type `RoomRole | null`, initially `null`.
+- [ ] `SharedDoc` has a `role` property of type `RoomRole | null`, initially `null`.
+- [ ] `getMyRole()` is called once per `SharedFolder` each time a WebSocket connection is established.
+- [ ] After a successful `getMyRole()` call, `SharedFolder.role` reflects the returned value.
+- [ ] `SharedDoc.role` reflects the parent folder's role.
+- [ ] If `getMyRole()` throws, `role` remains `null` and no error notice is shown to the user.
+- [ ] On reconnect, `getMyRole()` is called again and `role` is updated.
+""",
+    },
+    {
+        "title": "P4-S2 — Read-only editor for VIEWERs",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P4 — Permissions Enforcement
+
+**As a** user with the VIEWER role,
+**I want** the document to open in read-only mode,
+**so that** I cannot accidentally modify content and my changes are not rejected by the server.
+
+## Requirements
+
+- In `SharedDoc`, the `binding` getter (or wherever the CodeMirror extension is composed) checks `this.role`.
+- If `this.role === 'VIEWER'`:
+  - `yCollab()` is called **without** an `UndoManager` argument (so Ctrl+Z does not apply).
+  - The CodeMirror `EditorState.readOnly` facet is set to `true` via a `StateField` or compartment that is re-configured when the role is known.
+  - A `ViewPlugin` or equivalent shows a "Read only" annotation in the editor gutter or as a top-of-file banner.
+- If `this.role` is `null` (not yet known), the editor opens in read-write mode as a default; it is re-configured once `role` is set. This avoids a flash of read-only before the first successful role fetch.
+- If `this.role` changes from `null` to `VIEWER` after the editor is open, the editor transitions to read-only without requiring the file to be closed and reopened.
+
+## Acceptance Criteria
+
+- [ ] When `role` is `VIEWER`, `yCollab()` is called without an `UndoManager`.
+- [ ] When `role` is `VIEWER`, the `EditorState.readOnly` facet is `true` and keystrokes do not modify document content.
+- [ ] When `role` is `VIEWER`, a visual indicator ("Read only") is visible in the editor.
+- [ ] When `role` is `null`, the editor opens in read-write mode.
+- [ ] When `role` transitions from `null` to `VIEWER` on an already-open file, the editor becomes read-only without a file close/reopen.
+- [ ] When `role` is `OWNER` or `EDITOR`, the editor is fully editable and no "Read only" indicator is shown.
+- [ ] Pressing Ctrl+Z (undo) in VIEWER mode does not modify the document.
+""",
+    },
+    {
+        "title": "P4-S3 — Server-side viewer enforcement (integration concern)",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P4 — Permissions Enforcement
+
+**As a** developer,
+**I want** the plugin to behave correctly when the server refuses updates from VIEWERs,
+**so that** a user cannot bypass plugin-side read-only mode via the developer console or a modified client.
+
+> **Note:** Server-side enforcement is implemented server-side (not in this repo). This story covers the plugin-side handling of the case where the server silently drops VIEWER update messages — which is the expected behaviour — so the plugin does not need to do anything special. This story documents the expected observable behaviour for test purposes.
+
+## Requirements
+
+- The plugin does not implement any special logic to handle silently dropped updates; it relies on the CodeMirror read-only facet to prevent updates from being generated in the first place.
+- If the server drops an update (the Yjs doc state diverges from what the plugin sent), the server will push its authoritative state on the next sync, and the Yjs CRDT will reconcile. No data loss occurs.
+- The plugin does not show an error when update messages are silently dropped.
+
+## Acceptance Criteria
+
+- [ ] No plugin code attempts to detect whether the server has dropped a Yjs update message.
+- [ ] No error notice is shown to a VIEWER user as a result of the server discarding their (non-existent, due to read-only) updates.
+- [ ] Given a VIEWER opens a file, edits are prevented client-side; the document content matches the server state within 2 seconds of connecting.
+""",
+    },
+    {
+        "title": "P4-S4 — Role-gated UI elements",
+        "labels": ["enhancement"],
+        "body": """\
+**Epic:** P4 — Permissions Enforcement
+
+**As a** developer,
+**I want** all role-dependent UI elements to consistently gate on the cached role,
+**so that** VIEWERs do not see controls they cannot use.
+
+## Requirements
+
+The following UI elements must check `SharedFolder.role` before rendering:
+
+| Element | Condition to show |
+|---|---|
+| "Invite to [Room Name]" context menu item | `role === 'OWNER' \\|\\| role === 'EDITOR'` |
+| "Copy Invite Link" button in `InviteModal` | `role === 'OWNER' \\|\\| role === 'EDITOR'` (defence-in-depth) |
+| "Invite someone new" in `MembersModal` | `role === 'OWNER' \\|\\| role === 'EDITOR'` |
+
+When `role` is `null` (not yet fetched), treat as `EDITOR` (show the item). The server will enforce the actual permission.
+
+## Acceptance Criteria
+
+- [ ] "Invite to [Room Name]" is hidden when `SharedFolder.role === 'VIEWER'`.
+- [ ] "Invite to [Room Name]" is visible when `SharedFolder.role === 'OWNER'`.
+- [ ] "Invite to [Room Name]" is visible when `SharedFolder.role === 'EDITOR'`.
+- [ ] "Invite to [Room Name]" is visible when `SharedFolder.role === null`.
+- [ ] "Invite someone new" in `MembersModal` is hidden when the room role is `VIEWER`.
+- [ ] "Invite someone new" in `MembersModal` is visible for `OWNER` and `EDITOR`.
+- [ ] The `InviteModal` "Copy Invite Link" button is disabled (or hidden) when the role is `VIEWER`.
+""",
+    },
+    # ─── P5 — Bug Fixes & Hardening ──────────────────────────────────────────
+    {
+        "title": "P5-S1 — Fix backup restore path parsing (util.ts:74)",
+        "labels": ["bug"],
+        "body": """\
+**Epic:** P5 — Bug Fixes & Hardening
+
+**As a** developer,
+**I want** the backup restore function to correctly parse the room GUID from a backup path,
+**so that** restored rooms are associated with the correct document.
+
+## Problem
+
+`util.ts` line 74 contains:
+
+```typescript
+let guid = path[-2]
+```
+
+Negative array indexing is not valid in JavaScript. `path[-2]` always evaluates to `undefined`. This means restored documents are associated with `undefined` as their GUID, silently corrupting the restore.
+
+## Requirements
+
+- The expression `path[-2]` is replaced with correct array indexing:
+  ```typescript
+  const parts = path.split('/')
+  const guid = parts[parts.length - 2]
+  ```
+- The fix does not change any other logic in the function.
+- The variable is changed from `let` to `const` as it is not reassigned.
+
+## Acceptance Criteria
+
+- [ ] `path[-2]` does not appear anywhere in `util.ts`.
+- [ ] Given a backup path `"backups/abc-123/2024-01-01.json"`, the extracted GUID is `"abc-123"`.
+- [ ] Given a backup path with a deeply nested structure, the second-to-last path segment is returned as the GUID.
+- [ ] TypeScript compilation produces no errors in `util.ts`.
+- [ ] The fix is a minimal change — no surrounding logic is altered.
+""",
+    },
+    {
+        "title": "P5-S2 — Fix extension array management in main.ts",
+        "labels": ["bug"],
+        "body": """\
+**Epic:** P5 — Bug Fixes & Hardening
+
+**As a** developer,
+**I want** CodeMirror extensions to be tracked and removed correctly per document,
+**so that** opening and closing shared files does not accumulate stale extensions or cause editor errors.
+
+## Problem
+
+The current implementation pushes `sharedDoc.binding` into a shared `extensions` array on file open and uses `extensions.length = 0` on close. This approach:
+
+1. Does not remove the extension for the specific closed document — it clears all extensions.
+2. Re-adds the same extension on every open, potentially adding duplicates.
+3. Is not safe if multiple shared docs are open simultaneously.
+
+## Requirements
+
+- Extensions are tracked per-document, not in a single shared array.
+- On file open, the extension for that specific `SharedDoc` is added to the editor's state via a `Compartment` that is specific to the document instance.
+- On file close / `SharedDoc` destroy, only that document's compartment is reconfigured to an empty extension.
+- The fix must be safe when multiple shared documents are simultaneously open.
+- No `extensions.length = 0` pattern is used.
+
+## Acceptance Criteria
+
+- [ ] No `extensions.length = 0` appears in `main.ts` or any other source file.
+- [ ] Opening a shared file adds exactly one CodeMirror extension entry for that file.
+- [ ] Closing a shared file removes exactly that file's extension without affecting other open shared files.
+- [ ] Opening the same shared file twice (e.g. in a split pane) does not result in duplicate extension registrations.
+- [ ] Opening three shared files, then closing the middle one, leaves the first and third files with their extensions active.
+- [ ] TypeScript compilation produces no errors.
+""",
+    },
+    {
+        "title": "P5-S3 — Warn before overwriting local file with remote content",
+        "labels": ["bug"],
+        "body": """\
+**Epic:** P5 — Bug Fixes & Hardening
+
+**As a** user,
+**I want** to be warned before a remote sync overwrites local content,
+**so that** I do not lose work I have done before joining a shared room.
+
+## Problem
+
+`sharedTypes.ts` lines 56–61 (approximately) open a file for writing without checking whether the file already exists with content. If a user has local notes at the same path, they are silently overwritten on first sync.
+
+## Requirements
+
+- Before writing remote content to a local file path, check whether a file exists at that path **and** contains non-empty content.
+- If the file exists with content, display `FileOverwriteWarningModal` (new modal):
+
+```
+┌─ File conflict ─────────────────────────────┐
+│                                             │
+│  "[path]" already exists in your vault     │
+│  with local content.                        │
+│                                             │
+│  Accepting the remote version will          │
+│  overwrite your local changes.              │
+│                                             │
+│  [ Keep local file ]  [ Accept remote ]    │
+└─────────────────────────────────────────────┘
+```
+
+- "Keep local file": the write is aborted. The file is not touched. The room remains connected.
+- "Accept remote": the write proceeds. The local file content is overwritten with the remote content.
+- If the file does not exist, or exists but is empty, the write proceeds without a modal.
+- The modal is shown at most once per file per session. If the user has already chosen for a given path, subsequent syncs for that path follow the same choice without re-prompting.
+
+## Acceptance Criteria
+
+- [ ] `FileOverwriteWarningModal` is implemented as a new modal with the layout above.
+- [ ] Given a file that does not exist, the remote write proceeds without showing the modal.
+- [ ] Given a file that exists but is empty (0 bytes), the remote write proceeds without showing the modal.
+- [ ] Given a file that exists with non-empty content, `FileOverwriteWarningModal` is shown.
+- [ ] Clicking "Keep local file" in the modal does not modify the file on disk.
+- [ ] Clicking "Accept remote" in the modal writes the remote content to the file.
+- [ ] The room remains connected regardless of which option the user chooses.
+- [ ] After choosing "Keep local file" for a path, subsequent sync writes to that path in the same session proceed silently with the "keep local" behaviour (no repeated modal).
+- [ ] After choosing "Accept remote" for a path, subsequent sync writes to that path in the same session proceed silently with the "accept remote" behaviour.
+- [ ] TypeScript compilation produces no errors.
+""",
+    },
+]
+
+
+def main():
+    if len(sys.argv) < 4:
+        print("Usage: python3 create_issues.py <owner> <repo> <github_token>")
+        sys.exit(1)
+
+    owner = sys.argv[1]
+    repo = sys.argv[2]
+    token = sys.argv[3]
+
+    print(f"Creating {len(ISSUES)} issues in {owner}/{repo}...\n")
+
+    created = 0
+    failed = 0
+    for issue in ISSUES:
+        result = create_issue(owner, repo, token, issue["title"], issue["body"], issue["labels"])
+        if result:
+            created += 1
+        else:
+            failed += 1
+
+    print(f"\nDone. Created: {created}, Failed: {failed}")
+
+
+if __name__ == "__main__":
+    main()
