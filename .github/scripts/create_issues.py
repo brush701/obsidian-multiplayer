@@ -10,6 +10,34 @@ import urllib.request
 import urllib.error
 
 
+def list_existing_issues(owner, repo, token):
+    """Return a set of existing issue titles (open and closed)."""
+    titles = set()
+    page = 1
+    while True:
+        url = f"https://api.github.com/repos/{owner}/{repo}/issues?state=all&per_page=100&page={page}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                issues = json.loads(resp.read())
+                if not issues:
+                    break
+                for issue in issues:
+                    titles.add(issue["title"])
+                page += 1
+        except urllib.error.HTTPError as e:
+            print(f"  ERROR listing issues: {e.code} {e.read().decode()[:200]}")
+            break
+    return titles
+
+
 def create_issue(owner, repo, token, title, body, labels):
     url = f"https://api.github.com/repos/{owner}/{repo}/issues"
     data = json.dumps({"title": title, "body": body, "labels": labels}).encode()
@@ -1186,16 +1214,25 @@ def main():
 
     print(f"Creating {len(ISSUES)} issues in {owner}/{repo}...\n")
 
+    print("Fetching existing issues to skip duplicates...")
+    existing_titles = list_existing_issues(owner, repo, token)
+    print(f"Found {len(existing_titles)} existing issues.\n")
+
     created = 0
+    skipped = 0
     failed = 0
     for issue in ISSUES:
+        if issue["title"] in existing_titles:
+            print(f"  Skipped (already exists): {issue['title']}")
+            skipped += 1
+            continue
         result = create_issue(owner, repo, token, issue["title"], issue["body"], issue["labels"])
         if result:
             created += 1
         else:
             failed += 1
 
-    print(f"\nDone. Created: {created}, Failed: {failed}")
+    print(f"\nDone. Created: {created}, Skipped: {skipped}, Failed: {failed}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - copilot/create-github-issues-for-features
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
