@@ -2,6 +2,8 @@
 
 All user-facing workflows for creating, joining, sharing, and viewing rooms. This epic replaces the current `SharedFolderModal` and adds the invite and membership UI surfaces described in the spec.
 
+**Enterprise context:** In a fully managed corporate deployment, most users will never create or join rooms via the plugin. IT provisions room access via directory groups (SCIM → admin UI). The plugin-side flows in this epic serve two audiences: (1) power users who create rooms for ad-hoc collaboration and share invite links via Slack, and (2) end-users who receive an invite link and need to add a room to their vault. Admin-level room management (group assignments, member role changes, room deletion) lives in the admin web UI, not the plugin.
+
 **Dependencies:** P1 (settings schema), P2 (AuthManager — for API calls and gating UI on auth state)
 **Blocks:** P4 (Permissions — needs rooms to exist)
 
@@ -380,3 +382,45 @@ Behaviour:
 - [ ] While `listRooms()` is in flight, a loading message is shown.
 - [ ] When `listRooms()` fails, an error message is shown.
 - [ ] When the list is empty, "No additional rooms available" is shown.
+
+---
+
+### P3-S9 — Group-derived membership in MembersModal
+
+**As a** user,
+**I want** to see when a colleague's room access comes from a directory group rather than a direct invite,
+**so that** I understand that removing them from the room in the admin panel would be ineffective (their group membership would re-grant access on next sync).
+
+#### Requirements
+
+`MembersModal` is updated to display group-derived memberships separately from direct memberships.
+
+**Updated layout:**
+
+```
+┌─ Q4 Planning — Members ─────────────────────────┐
+│                                                  │
+│  Direct members                                  │
+│  alice@company.com    Owner                     │
+│  bob@company.com      Editor                    │
+│                                                  │
+│  Via "Engineering" group                         │
+│  carol@company.com    Editor                    │
+│  dave@company.com     Editor                    │
+│                                                  │
+│  [ Invite someone new ]                          │
+│  [ Manage in admin panel ↗ ]                    │
+└──────────────────────────────────────────────────┘
+```
+
+The server returns group-derived membership in `GET /api/rooms/:guid` alongside direct members. The plugin renders them in a separate section labelled with the group's `displayName`. Users who appear in both direct and group sections are shown only under "Direct members" (direct membership takes precedence and is what the admin panel would modify).
+
+If the room has no group-derived members, the section is omitted.
+
+#### Acceptance Criteria
+
+- [ ] `RoomDetail` type in `src/api.ts` is extended to include `groupMembers: { groupName: string, members: RoomMember[] }[]`.
+- [ ] `MembersModal` renders a "Direct members" section and, if present, one or more "Via [group name]" sections.
+- [ ] Users who are both direct members and group members appear only under "Direct members".
+- [ ] If `groupMembers` is empty or absent, no group section is rendered.
+- [ ] The "Manage in admin panel ↗" link is shown when group-derived members are present, regardless of the viewer's role.

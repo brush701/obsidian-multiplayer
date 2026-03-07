@@ -2,6 +2,8 @@
 
 Implement the OAuth 2.0 Authorization Code + PKCE sign-in flow, secure token storage via Obsidian's SecretStorage API, and all plugin-side surfaces that reflect authentication state.
 
+**Enterprise context:** The plugin never manages credentials directly. SSO is the primary authentication path; the plugin simply redirects to the server's auth page, which handles IdP federation. Local account support is a server-side bootstrap concern — the plugin makes no distinction. When the server has SSO enforcement enabled, the auth page presented in the browser will only offer SSO options.
+
 **Dependencies:** P1 (settings schema and WebSocket provider stub must exist)
 **Blocks:** P3 (Room Management), P4 (Permissions)
 
@@ -349,3 +351,39 @@ A status bar item is added in `main.ts` via `this.addStatusBarItem()`.
 - [ ] Status bar displays "⚠ Multiplayer: sign in again" after a 4001 close or refresh failure.
 - [ ] Clicking the status bar item in the "sign in again" state opens the settings tab.
 - [ ] Status bar item is removed on plugin unload.
+
+---
+
+### P2-S9 — Forced sign-out on server-side session revocation
+
+**As an** IT administrator,
+**I want** a user's Obsidian session to end promptly when I revoke it server-side (via deprovisioning or the admin UI),
+**so that** a departing employee cannot continue reading or editing documents once their access is revoked.
+
+#### Requirements
+
+When a WebSocket connection is closed with code 4001 (Unauthorized) **and** a subsequent token refresh also fails with a 401, the plugin treats the session as permanently revoked (not a transient error):
+
+1. `AuthManager.signOut()` is called (clears stored tokens).
+2. All `WebsocketProvider` instances call `provider.disconnect()`.
+3. A persistent (non-auto-dismissing) `Notice` is shown: "Your session has been ended by your administrator. Please contact IT if you believe this is an error."
+4. The status bar shows `⚠ Multiplayer: session ended`.
+
+This path is distinct from a transient network failure or an expired access token that can be refreshed:
+
+| Situation | Behaviour |
+|---|---|
+| Access token expired, refresh succeeds | Silent refresh; user unaffected |
+| Access token expired, refresh 401 (session revoked) | Full sign-out; persistent notice |
+| 4001 WS close, not due to revocation (race condition) | Attempt one refresh; if refresh succeeds, reconnect |
+| 4001 WS close + refresh 401 | Full sign-out; persistent notice |
+
+The plugin does not poll the server to detect revocation. Revocation is only detected when the plugin next tries to refresh a token.
+
+#### Acceptance Criteria
+
+- [ ] Given a 4001 WS close followed by a 401 refresh response, `signOut()` is called and tokens are cleared.
+- [ ] The persistent notice text references administrator action.
+- [ ] Status bar shows `⚠ Multiplayer: session ended` (distinct from the transient "sign in again" state).
+- [ ] Given a 4001 WS close followed by a successful refresh, the plugin reconnects without showing an error.
+- [ ] No automatic retry loop is entered after a permanent session revocation.

@@ -1,7 +1,7 @@
 # Obsidian Multiplayer — Technical Specification
 
 **Status:** Draft
-**Last updated:** 2026-03-06
+**Last updated:** 2026-03-07
 
 ---
 
@@ -30,6 +30,9 @@
    - 5.7 [OIDC Provider](#57-oidc-provider)
    - 5.8 [Admin Web UI](#58-admin-web-ui)
    - 5.9 [Deployment](#59-deployment)
+   - 5.10 [SCIM 2.0 Provisioning API](#510-scim-20-provisioning-api)
+   - 5.11 [Session Management](#511-session-management)
+   - 5.12 [Audit Log](#512-audit-log)
 6. [Permissions Model](#6-permissions-model)
 7. [Invitation Flow](#7-invitation-flow)
 8. [Deprovisioning](#8-deprovisioning)
@@ -40,15 +43,21 @@
 
 ## 1. Goals
 
-Obsidian Multiplayer enables real-time collaborative editing of notes directly inside Obsidian. The objective is to make it production-ready for teams in a business context.
+Obsidian Multiplayer enables real-time collaborative editing of notes directly inside Obsidian. The objective is to be **the obvious self-hosted solution for enterprises with real IT requirements** — organisations that cannot use a SaaS collaborative tool due to data sovereignty, compliance, or security policy.
+
+The primary customer is a corporate IT or security team that needs to deploy and operate a collaboration backend inside their own perimeter, integrate it with their existing identity infrastructure, and satisfy their security and audit requirements without depending on any external vendor's uptime, trust, or compliance posture.
 
 ### Design Principles
 
-- **Self-hostable first.** A business should be able to run the entire stack on their own infrastructure with a single `docker compose up`. No dependency on any Anthropic- or author-operated cloud service.
-- **Integrate with existing identity.** Businesses already have Okta, Azure AD, Google Workspace, or similar. The plugin and server must work with those — not require a new set of credentials.
-- **Minimal plugin UI surface.** The Obsidian plugin is for writing, not administration. Keep permissions management out of the plugin except for the core daily workflows (sharing a room, joining a room). Heavy administration belongs in a web UI.
-- **No custom cryptography.** The existing hand-rolled AES-256-GCM password system is replaced entirely by OAuth 2.0 and the Obsidian SecretStorage API.
-- **Enforce permissions server-side.** The client cannot be trusted. All access control is enforced by the server at the WebSocket connection level.
+- **Self-hostable, air-gap friendly.** The entire stack runs on company infrastructure with `docker compose up`. The server makes zero outbound calls to any external service after initial deployment. No telemetry, no license checks, no cloud dependency.
+- **Corporate identity is the only identity.** SSO via OIDC or SAML is the primary authentication path. Local accounts are an optional fallback for bootstrapping only; IT can disable them entirely once SSO is configured. There are no email-and-password sign-ups.
+- **Provisioning and deprovisioning through standard tooling.** SCIM 2.0 support means user lifecycle is managed by the company's existing IdP (Okta, Azure AD, etc.) — not by manual admin actions. When a user's corporate account is deprovisioned, their access is terminated automatically.
+- **IT-managed access control.** Room membership can be derived from corporate directory groups. IT can manage who has access to what without depending on end-users to send invite links.
+- **Audit trail for everything.** All security-relevant events are logged with actor, timestamp, and IP — and can be exported to a company's SIEM. IT can prove who accessed what document and when.
+- **Immediate revocation.** When a user is deprovisioned or a security incident occurs, their access is terminated within seconds — not after the next token refresh cycle.
+- **Enforce permissions server-side.** The client cannot be trusted. All access control is enforced by the server at the WebSocket connection and REST API level.
+- **Minimal plugin UI surface.** The Obsidian plugin is for writing, not administration. Room permissions, user management, and IdP configuration live in an admin web UI, not the plugin.
+- **No custom cryptography.** The hand-rolled AES-256-GCM password system is replaced entirely by OAuth 2.0 and the Obsidian SecretStorage API.
 
 ### Non-Goals (v1)
 
@@ -56,6 +65,8 @@ Obsidian Multiplayer enables real-time collaborative editing of notes directly i
 - End-to-end encryption of document content — the server sees plaintext Yjs updates. Viable future addition once auth is solid.
 - Fine-grained per-paragraph permissions.
 - Obsidian Publish integration.
+- Consumer or prosumer onboarding flows (email sign-up, credit card, self-serve billing).
+- Local accounts as a primary authentication mode — supported only as a bootstrapping mechanism before SSO is configured.
 
 ---
 
@@ -533,15 +544,19 @@ datasource db {
 }
 
 model User {
-  id          String       @id @default(uuid())
-  email       String       @unique
-  name        String
+  id             String        @id @default(uuid())
+  email          String        @unique
+  name           String
+  externalId     String?       @unique  // IdP subject claim (for SCIM correlation)
+  deactivatedAt  DateTime?              // set on SCIM deprovision; blocks new sessions
   // Passwords for local accounts are managed by node-oidc-provider's
   // built-in adapter — not stored here.
-  memberships RoomMember[]
-  orgRoles    OrgMember[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  memberships    RoomMember[]
+  orgRoles       OrgMember[]
+  groupMemberships GroupMember[]
+  sessions       Session[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 model Organization {
@@ -611,6 +626,96 @@ model RoomInvite {
 
   room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
 }
+
+// SCIM bearer tokens, issued to the IdP for automated provisioning
+model ScimToken {
+  id          String    @id @default(uuid())
+  description String                         // e.g. "Okta provisioning token"
+  tokenHash   String    @unique              // bcrypt hash of the raw token
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+}
+
+// IdP group → org-level group mapping for group-based room access
+model DirectoryGroup {
+  id          String              @id @default(uuid())
+  externalId  String              @unique  // Group ID from IdP (SCIM externalId)
+  displayName String
+  roomLinks   GroupRoomAccess[]
+  members     GroupMember[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model GroupMember {
+  userId  String
+  groupId String
+  user    User           @relation(fields: [userId],  references: [id], onDelete: Cascade)
+  group   DirectoryGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+}
+
+model GroupRoomAccess {
+  groupId String
+  roomId  String
+  role    RoomRole
+
+  group   DirectoryGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  room    Room           @relation(fields: [roomId],  references: [id], onDelete: Cascade)
+
+  @@id([groupId, roomId])
+}
+
+// Audit log — append-only, never updated or deleted
+model AuditEvent {
+  id         String    @id @default(uuid())
+  occurredAt DateTime  @default(now())
+  actorId    String?   // userId; null for system/SCIM events
+  actorEmail String?   // denormalized for readability after user deletion
+  actorIp    String?
+  event      AuditEventType
+  resourceType String  // "room" | "user" | "org" | "session" | "invite" | "scim"
+  resourceId String?
+  detail     Json?     // event-specific payload (old/new values, etc.)
+}
+
+enum AuditEventType {
+  USER_CREATED
+  USER_DEACTIVATED
+  USER_REACTIVATED
+  USER_ORG_ROLE_CHANGED
+  SESSION_CREATED
+  SESSION_TERMINATED          // admin-initiated forced sign-out
+  ROOM_CREATED
+  ROOM_DELETED
+  ROOM_MEMBER_ADDED
+  ROOM_MEMBER_REMOVED
+  ROOM_MEMBER_ROLE_CHANGED
+  INVITE_CREATED
+  INVITE_CLAIMED
+  INVITE_REVOKED
+  SCIM_USER_PROVISIONED
+  SCIM_USER_DEPROVISIONED
+  SCIM_GROUP_SYNCED
+  IDP_CONFIG_CHANGED
+  SSO_ENFORCEMENT_CHANGED
+}
+
+// Active sessions — used for immediate revocation and session listing in admin UI
+model Session {
+  id           String    @id @default(uuid())
+  userId       String
+  refreshTokenHash String @unique            // bcrypt hash of the issued refresh token
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  ipAddress    String?
+  userAgent    String?
+  revokedAt    DateTime?                     // set on forced sign-out or SCIM deprovision
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
 ```
 
 ### 5.4 REST API
@@ -674,27 +779,87 @@ DELETE /api/rooms/:guid
 
 ```
 GET    /admin/api/users
-  Returns: [{ id, email, name, orgRole, createdAt, lastSeen }]
+  Returns: [{ id, email, name, orgRole, createdAt, lastSeen, deactivatedAt }]
 
-POST   /admin/api/users/invite
-  Body:    { email: string, orgRole: "MEMBER" | "ADMIN" }
-  Notes:   Sends invite email. Creates a pending User record.
+POST   /admin/api/users
+  Body:    { email: string, name: string, orgRole: "MEMBER" | "ADMIN" }
+  Notes:   Creates a local-account user. Primary path for non-SCIM setups only.
 
-DELETE /admin/api/users/:id
-  Notes:   Deactivates user. Does not delete; preserves audit history.
+PATCH  /admin/api/users/:id
+  Body:    { orgRole?, deactivated? }
+  Notes:   Change org role or deactivate. Deactivation revokes all active sessions.
+
+GET    /admin/api/users/:id/sessions
+  Returns: [{ id, createdAt, lastSeenAt, ipAddress, userAgent, revokedAt }]
+  Notes:   All sessions for a user (active and revoked).
+
+DELETE /admin/api/users/:id/sessions/:sessionId
+  Notes:   Force-terminate a specific session. Issues revocation; blocks refresh.
+
+DELETE /admin/api/users/:id/sessions
+  Notes:   Force-terminate ALL sessions for a user. Used on security incidents.
 
 GET    /admin/api/rooms
   Returns: All rooms in the org with member counts.
 
+GET    /admin/api/groups
+  Returns: [{ id, externalId, displayName, memberCount, roomLinks }]
+  Notes:   Directory groups synced from IdP via SCIM.
+
+POST   /admin/api/groups/:id/room-access
+  Body:    { roomId: string, role: "EDITOR" | "VIEWER" }
+  Notes:   Grant a directory group access to a room at the specified role.
+
+DELETE /admin/api/groups/:id/room-access/:roomId
+  Notes:   Remove a group's access to a room.
+
 GET    /admin/api/audit
-  Returns: Paginated log of room connections, invite claims, role changes.
+  Query:   ?page&limit&event&actorId&resourceId&from&to
+  Returns: Paginated AuditEvent records, newest first.
+
+GET    /admin/api/audit/export
+  Query:   ?format=csv|jsonl&from&to&event
+  Returns: Streamed export of audit events. Used for SIEM ingestion / compliance reports.
 
 GET    /admin/api/config
-  Returns: Current server config (OIDC upstreams, org settings).
+  Returns: Current server config (OIDC upstreams, org settings, SSO enforcement).
 
 PUT    /admin/api/config
-  Body:    Partial config update (e.g. add/remove OIDC upstream).
+  Body:    Partial config update (e.g. add/remove OIDC upstream, toggle SSO enforcement).
   Notes:   Triggers OIDC provider reload; no restart required.
+
+GET    /admin/api/scim/tokens
+  Returns: [{ id, description, createdAt, lastUsedAt, revokedAt }]
+  Notes:   Lists SCIM bearer tokens (never returns raw token value).
+
+POST   /admin/api/scim/tokens
+  Body:    { description: string }
+  Returns: { id, token }  — raw token shown once only; store it in the IdP.
+
+DELETE /admin/api/scim/tokens/:id
+  Notes:   Revoke a SCIM token.
+```
+
+#### SCIM 2.0 (see §5.10 for full spec)
+
+```
+GET    /scim/v2/ServiceProviderConfig
+GET    /scim/v2/Schemas
+GET    /scim/v2/ResourceTypes
+
+GET    /scim/v2/Users
+POST   /scim/v2/Users
+GET    /scim/v2/Users/:id
+PUT    /scim/v2/Users/:id
+PATCH  /scim/v2/Users/:id
+DELETE /scim/v2/Users/:id
+
+GET    /scim/v2/Groups
+POST   /scim/v2/Groups
+GET    /scim/v2/Groups/:id
+PUT    /scim/v2/Groups/:id
+PATCH  /scim/v2/Groups/:id
+DELETE /scim/v2/Groups/:id
 ```
 
 ### 5.5 WebSocket Handler
@@ -797,9 +962,15 @@ setPersistence({
 |---|---|
 | OIDC upstream | Google Workspace, Okta, Azure AD (v2), Keycloak, Authentik |
 | SAML 2.0 | Azure AD (SAML), ADFS, any enterprise SAML IdP |
-| Local accounts | Email + password (bcrypt), for teams without an enterprise IdP |
+| Local accounts | Email + password (bcrypt), bootstrap only — disabled by default once SSO is configured |
 
-Multiple upstreams can be active simultaneously. The auth page shows a button for each configured upstream plus a local login form if local accounts are enabled.
+Multiple upstreams can be active simultaneously. The auth page shows a button for each configured upstream plus, if enabled, a local login form.
+
+**SSO enforcement mode:**
+When `auth.sso_required: true` is set in `config.yaml` (or toggled in the admin UI), local account login is disabled entirely. Any user without a valid SSO session cannot authenticate. This is the expected state for a production corporate deployment. SSO enforcement is logged as an audit event every time it changes.
+
+**Group sync from upstream IdP:**
+When a SCIM 2.0 provisioner is configured (see §5.10), group membership flows from the IdP into `DirectoryGroup` / `GroupMember` tables automatically. Room access can then be granted to a group, meaning IT only manages group membership in their IdP — not in this system.
 
 **Token lifetimes:**
 
@@ -826,13 +997,18 @@ A React single-page app served at `/admin`. Requires authentication (OIDC login 
 
 | Page | Capabilities |
 |---|---|
-| Users | List users, invite by email, deactivate, change org role |
-| Rooms | List all rooms, view/change members, delete room, view pending invites, revoke invite |
-| Identity Providers | Add/edit/remove OIDC and SAML upstream configs; test connection |
-| Audit Log | Paginated log: room connections, invite claims, role changes, deactivations |
-| Settings | Org name, `openToOrg` default, SMTP config |
+| Users | List users with SSO status; deactivate; change org role; view and force-terminate active sessions |
+| Rooms | List all rooms; view/change members; assign directory groups; delete room; revoke pending invites |
+| Groups | View directory groups synced from IdP; assign groups to rooms at a given role |
+| Identity Providers | Add/edit/remove OIDC and SAML upstream configs; test connection; enable/disable SSO enforcement |
+| Provisioning (SCIM) | Generate and revoke SCIM bearer tokens; view last sync timestamp; view provisioning event history |
+| Audit Log | Paginated, filterable log of all security events; export to CSV or JSONL for SIEM ingestion |
+| Sessions | View all active sessions org-wide; filter by user; force-terminate individual sessions or all sessions for a user |
+| Settings | Org name, `openToOrg` default, SSO enforcement toggle, TLS and network policy config |
 
 The admin UI communicates with `/admin/api/*` routes. It is bundled as static files and served directly by Fastify — no separate web server needed.
+
+> **No SMTP dependency.** Email invite delivery is not a core feature. Corporate users are onboarded via SCIM or by an admin distributing invite links through existing internal channels (Slack, email, Confluence, etc.). SMTP configuration is optional and only used if the admin explicitly enables email delivery for invite links.
 
 ### 5.9 Deployment
 
@@ -913,10 +1089,108 @@ auth:
 ```
 
 **TLS:**
-The server listens on port 3000 (HTTP). TLS should be terminated by a reverse proxy in front (nginx, Caddy, Traefik). A Caddy example is included in the repo's `docs/deployment/` directory. Caddy is recommended for its automatic Let's Encrypt certificate management.
+The server listens on port 3000 (HTTP). TLS should be terminated by a reverse proxy in front (nginx, Caddy, Traefik). For internal corporate deployments using a private PKI (internal CA), nginx or Traefik are recommended — Caddy's Let's Encrypt automation is only useful if the server is internet-reachable. Deployment docs include examples for both public TLS (Caddy) and internal CA (nginx).
+
+Minimum TLS version: 1.2. Configurable via `tls.min_version` in `config.yaml`. Recommended: TLS 1.3 only for high-security deployments.
+
+**Network isolation:**
+The server makes zero outbound connections after startup, with the following exceptions:
+- Fetching JWKS from upstream OIDC providers (only if OIDC federation is configured). This can be disabled by providing the IdP's public key directly in `config.yaml`, enabling fully air-gapped operation.
+- SAML metadata refresh (only if SAML upstream is configured). Can be disabled by providing static metadata.
+
+All network behaviour is documented in `docs/deployment/network-policy.md` with example Kubernetes NetworkPolicy and firewall rule sets.
+
+**Container image provenance:**
+The Docker image is built and signed via GitHub Actions. The image digest and SBOM are published with each release so IT teams can verify integrity before deployment.
 
 **First-run bootstrap:**
-On first startup, if no users exist, the server creates an initial admin account and prints the credentials to stdout (one time only). The admin uses these to log into the admin UI and configure their IdP.
+On first startup, if no users exist, the server creates an initial admin account and prints the credentials to stdout (one time only). The admin uses these to log into the admin UI and configure their IdP. Once SSO is configured, the local admin account can be deactivated.
+
+### 5.10 SCIM 2.0 Provisioning API
+
+SCIM 2.0 (RFC 7644) allows an enterprise IdP (Okta, Azure AD, etc.) to automatically provision and deprovision users and groups. This eliminates the need for manual user management at scale and ensures that when someone leaves the company, their access is revoked automatically and promptly.
+
+**Authentication:**
+SCIM endpoints use HTTP Bearer token authentication. Tokens are generated in the admin UI and stored as a bcrypt hash in `ScimToken`. The raw token is shown once at creation time — the admin copies it into their IdP's provisioning configuration.
+
+```
+Authorization: Bearer <scim-token>
+```
+
+**Supported operations:**
+
+| Resource | Create | Read | Update | Deactivate | Delete |
+|---|---|---|---|---|---|
+| User | ✓ | ✓ | ✓ (name, email) | ✓ (`active: false`) | ✓ |
+| Group | ✓ | ✓ | ✓ (name, members) | — | ✓ |
+
+**User provisioning:**
+When the IdP provisions a user (`POST /scim/v2/Users`), a `User` record is created with `externalId` set to the IdP's subject. If the user already exists by email, the records are linked (not duplicated).
+
+**User deprovisioning:**
+When the IdP deprovisions a user (`PATCH /scim/v2/Users/:id` with `active: false`, or `DELETE`):
+1. `User.deactivatedAt` is set to `now()`.
+2. All `Session` records for the user have `revokedAt` set — blocking any further refresh token use.
+3. The OIDC provider's refresh token store is cleared for the user.
+4. An `AuditEvent` of type `SCIM_USER_DEPROVISIONED` is written.
+
+Result: the user is locked out within the access token lifetime (1 hour) with no manual intervention. The short (1h) access token lifetime combined with the session revocation means effective lockout happens when the access token expires naturally — or immediately if the token denylist is enabled (see §5.11).
+
+**Group sync:**
+Groups pushed by the IdP populate `DirectoryGroup` and `GroupMember`. Group membership in a room is configured in the admin UI (`GroupRoomAccess`). The membership resolution on each WebSocket connection includes group-derived access (after direct membership, before open-to-org).
+
+**Membership resolution order (updated):**
+1. Direct `RoomMember` record (highest priority)
+2. Group-derived access: user is in a `DirectoryGroup` that has a `GroupRoomAccess` for this room
+3. `Room.openToOrg = true`: all org members get EDITOR
+4. No access → 4003
+
+**IdP compatibility:**
+Tested and documented configurations for: Okta, Azure AD / Entra ID, Google Workspace (via third-party SCIM bridge), OneLogin, Jumpcloud.
+
+### 5.11 Session Management
+
+Session records track all issued refresh tokens. This enables two critical capabilities: session listing (visibility) and forced termination (control).
+
+**Token denylist:**
+Every WebSocket connection and API call validates the access token's JWT claims locally. Additionally, if a session has `revokedAt` set, any refresh attempt is rejected immediately. For access tokens (which are stateless JWTs), a per-session denylist entry in the `Session` table means that after revocation, any API call or WS reconnect that triggers a token refresh will fail — locking the user out within one request cycle, not one token lifetime.
+
+> **Implementation note:** At WebSocket connect time, in addition to JWT signature verification, the server checks that a non-revoked `Session` exists for the `jti` (JWT ID) claim. Access tokens include a `sessionId` claim that maps to `Session.id`. This eliminates the 1-hour window.
+
+**Admin session termination:**
+From the admin UI Sessions page, an admin can:
+- View all active sessions for any user (IP address, user agent, last seen)
+- Terminate a specific session (sets `Session.revokedAt`, triggers access token denylist)
+- Terminate all sessions for a user (used for suspected account compromise)
+
+Session termination is logged as `SESSION_TERMINATED` in the audit log.
+
+### 5.12 Audit Log
+
+The audit log is append-only and stores all security-relevant events. It is never modified or deleted after the fact. Retention is configurable (default: 2 years).
+
+**Event schema (mirrors `AuditEvent` Prisma model):**
+
+```typescript
+interface AuditEvent {
+  id:           string             // uuid
+  occurredAt:   string             // ISO 8601
+  actorId:      string | null      // userId; null for system/SCIM events
+  actorEmail:   string | null      // denormalized — survives user deletion
+  actorIp:      string | null
+  event:        AuditEventType
+  resourceType: string
+  resourceId:   string | null
+  detail:       Record<string, unknown> | null  // event-specific payload
+}
+```
+
+**SIEM export:**
+`GET /admin/api/audit/export?format=jsonl&from=2026-01-01&to=2026-03-07`
+Returns newline-delimited JSON, one event per line. This format is directly ingestible by Splunk, Elastic, Datadog, and most other SIEM tools. Can be scheduled as a cron job or pulled by a log shipper.
+
+**Retention:**
+Configurable via `audit.retention_days` in `config.yaml`. Default: 730 days (2 years). A background job runs nightly and deletes records older than the retention window. Deletion is itself logged as a system event.
 
 ---
 
@@ -949,8 +1223,9 @@ Org `ADMIN`/`OWNER` can manage room memberships for any room in the org via the 
 On each WebSocket connection, the server resolves effective membership in this order:
 
 1. **Direct room membership** — explicit `RoomMember` record. Always takes precedence.
-2. **Org-open room** — if `Room.openToOrg = true` and user is an org member, they get `EDITOR`.
-3. **No access** — connection refused with 4003.
+2. **Group-derived access** — user is a member of a `DirectoryGroup` that has a `GroupRoomAccess` record for this room. The role from `GroupRoomAccess.role` is used. If the user is in multiple groups with different roles, the highest-privilege role wins.
+3. **Org-open room** — if `Room.openToOrg = true` and user is an org member, they get `EDITOR`.
+4. **No access** — connection refused with 4003.
 
 ### Default Behaviour
 
@@ -996,29 +1271,34 @@ The invite URL can also be pasted directly into the "Join" tab of `SharedFolderM
 
 ## 8. Deprovisioning
 
-### SSO-federated users
+### SCIM-provisioned users (primary path)
 
-When a user's account is deactivated in the upstream IdP (Okta, Azure AD, etc.):
+When a user's account is deprovisioned in the IdP (Okta, Azure AD, etc.), the IdP's SCIM client calls `PATCH /scim/v2/Users/:id` (with `active: false`) or `DELETE /scim/v2/Users/:id`. The server:
 
-1. Their SSO session is terminated by the IdP.
-2. They cannot complete a new OAuth flow → cannot get a fresh access token.
-3. Existing access tokens expire within 1 hour (the access token lifetime).
-4. Refresh tokens fail to refresh (the OIDC provider's upstream check fails).
-5. The plugin shows "Session expired — sign in again" and goes offline.
+1. Sets `User.deactivatedAt`.
+2. Revokes all active `Session` records for the user (sets `revokedAt`).
+3. Writes a `SCIM_USER_DEPROVISIONED` audit event.
 
-No action required on the server beyond deactivating the upstream account.
+Because the session denylist is checked on every WebSocket connect and refresh attempt, the user is effectively locked out immediately — they cannot reconnect after their current connection drops, and cannot refresh their access token.
+
+The SSO session at the IdP level is simultaneously terminated by the IdP itself (standard SCIM deprovisioning behaviour). The user cannot complete a new OAuth flow.
+
+### Manual deprovisioning (admin UI)
+
+For urgent cases (suspected compromise, termination without advance IdP action), an admin can:
+
+1. Navigate to Users → select user → "Deactivate and terminate all sessions"
+2. This is equivalent to the SCIM path above: sets `deactivatedAt`, revokes all sessions, logs `USER_DEACTIVATED`.
 
 ### Local account users
 
-Admin deactivates the user in the admin UI (`DELETE /admin/api/users/:id`). The OIDC provider marks the account disabled and refuses new token issuance. Same expiry behaviour as SSO above.
+Admin deactivates via the admin UI. The OIDC provider marks the account disabled and refuses new token issuance. Session revocation applies as above.
 
-### Immediate revocation
+### Immediate revocation guarantee
 
-If access must be cut off faster than the 1-hour token lifetime:
+All deprovisioning paths (SCIM, manual admin, session termination) revoke sessions synchronously. The `sessionId` claim in access tokens is checked against the `Session` table on every protected request. A revoked session means the next WebSocket reconnect or API call that requires a fresh token will fail — eliminating the 1-hour window that stateless JWTs would otherwise create.
 
-- The OIDC provider maintains a token revocation list (standard `node-oidc-provider` behaviour via `oidc.revoke()`).
-- Admin deactivation via the admin UI triggers revocation of all outstanding refresh tokens for that user.
-- Access tokens remain valid for the remainder of their lifetime (up to 1 hour) — this is inherent to stateless JWTs. If immediate revocation of access tokens is required in future, a short-lived token denylist (Redis or PostgreSQL) can be added.
+This is a **requirement**, not an optional future enhancement.
 
 ---
 
@@ -1048,13 +1328,14 @@ _Goal: Remove all custom crypto. Plugin loads without a password prompt._
 _Goal: Running server with auth-gated WebSocket sync._
 
 - Scaffold `obsidian-multiplayer-server` repo (Fastify + TypeScript)
-- PostgreSQL + Prisma schema + initial migrations
-- Implement `node-oidc-provider` with local account support only (SSO federation comes later)
-- JWT validation middleware
-- WebSocket handler with JWT check + room membership check
+- PostgreSQL + Prisma schema + initial migrations (includes `Session`, `AuditEvent`, `ScimToken`, `DirectoryGroup` tables)
+- Implement `node-oidc-provider` with local account support (SSO bootstrap only)
+- JWT validation middleware with `sessionId` claim check against `Session` table
+- WebSocket handler with JWT check + room membership check (all four resolution steps)
 - `y-leveldb` persistence
 - Room CRUD REST API (`POST /api/rooms`, `GET /api/rooms`, `GET /api/rooms/:guid`)
 - Docker Compose (server + PostgreSQL)
+- Audit log: write `ROOM_CREATED`, `ROOM_MEMBER_ADDED` events from day 1
 - Verify plugin can connect with a hardcoded token
 
 ### Phase 4 — Plugin OAuth Flow
@@ -1067,9 +1348,55 @@ _Goal: Full sign-in flow. No hardcoded tokens._
 - Token refresh before WS connect
 - Handle WS close codes 4001/4003/4004 with appropriate notices
 - Connection status bar item
+- Audit log: `SESSION_CREATED` on sign-in
 
-### Phase 5 — Invitations and Room Management
-_Goal: Complete sharing workflow._
+### Phase 5 — SSO Federation + SSO Enforcement
+_Goal: Businesses connect their existing IdP and disable local accounts._
+
+- OIDC upstream federation in `node-oidc-provider` (Okta, Azure AD, Google Workspace)
+- SAML 2.0 upstream support (Azure AD SAML, ADFS)
+- `config.yaml` parsing for upstream IdP configuration
+- Live config reload (no server restart required)
+- SSO enforcement mode: `auth.sso_required: true` disables local account login
+- Admin UI: IdP configuration page with connection test; SSO enforcement toggle
+- Audit log: `IDP_CONFIG_CHANGED`, `SSO_ENFORCEMENT_CHANGED`
+
+### Phase 6 — SCIM 2.0 Provisioning
+_Goal: User and group lifecycle managed automatically by the IdP._
+
+- `/scim/v2/Users` — full CRUD + `active: false` deprovisioning
+- `/scim/v2/Groups` — full CRUD; syncs `DirectoryGroup` + `GroupMember` tables
+- SCIM bearer token management (admin UI: generate, list, revoke)
+- User deprovisioning: set `deactivatedAt`, revoke all sessions, write audit event
+- Group-based room access: `GroupRoomAccess` table; membership resolution includes group step
+- Admin UI: Provisioning page (token management, last sync time, event history)
+- Audit log: `SCIM_USER_PROVISIONED`, `SCIM_USER_DEPROVISIONED`, `SCIM_GROUP_SYNCED`
+- Tested configurations for Okta, Azure AD / Entra ID in `docs/deployment/scim/`
+
+### Phase 7 — Session Management + Immediate Revocation
+_Goal: IT can terminate any user's access within seconds, not hours._
+
+- `Session` table tracks all issued refresh tokens (created at token issue time)
+- Access tokens include `sessionId` claim; checked against `Session.revokedAt` on every request
+- Admin UI: Sessions page — list active sessions, terminate individual, terminate all for a user
+- Manual deprovision flow: "Deactivate and terminate all sessions" in Users admin page
+- Audit log: `SESSION_TERMINATED`, `USER_DEACTIVATED`
+
+### Phase 8 — Admin Web UI (full)
+_Goal: IT admins can manage everything without a CLI._
+
+- Scaffold React admin UI (Vite)
+- Users: list, deactivate, change org role, view sessions, force-terminate sessions
+- Rooms: list all, view/change members, assign directory groups, delete, manage invites
+- Groups: view SCIM-synced groups, assign to rooms
+- Identity Providers: add/edit/remove OIDC and SAML upstreams, test connection
+- Provisioning: SCIM token management, sync status
+- Audit Log: paginated, filterable; export to CSV/JSONL
+- Sessions: org-wide session list, per-user session termination
+- Build + bundle into server's static directory
+
+### Phase 9 — Invitations and Room Management (plugin)
+_Goal: End-users can share rooms without involving IT for basic workflows._
 
 - `POST /api/rooms/join` endpoint (server)
 - `POST /api/rooms/:guid/invites` endpoint (server)
@@ -1080,60 +1407,48 @@ _Goal: Complete sharing workflow._
 - `obsidian://multiplayer/join` protocol handler (auto-add room to vault)
 - "Available rooms" list in settings tab (`GET /api/rooms`)
 
-### Phase 6 — Permissions Enforcement
+### Phase 10 — Permissions Enforcement
 _Goal: VIEWER role works correctly._
 
 - `GET /api/rooms/:guid/me` endpoint (server)
 - Plugin fetches role on connect; sets CodeMirror read-only for VIEWERs
 - Viewer socket wrapper on server (drops incoming update messages)
 - "Read only" indicator in editor for VIEWERs
-- `Room.openToOrg` flag and membership resolution logic
+- `Room.openToOrg` flag and membership resolution logic (all four steps)
 
-### Phase 7 — SSO Federation
-_Goal: Businesses can use their existing IdP._
-
-- OIDC upstream federation in `node-oidc-provider` (Google, Okta, Azure AD)
-- SAML 2.0 upstream support
-- `config.yaml` parsing for upstream IdP configuration
-- Live config reload (no server restart required)
-- Admin UI: IdP configuration page with connection test
-
-### Phase 8 — Admin Web UI
-_Goal: IT admins can manage users, rooms, and configuration without a CLI._
-
-- Scaffold React admin UI (Vite)
-- User management (list, invite, deactivate, org role)
-- Room management (list all, members, delete, pending invites)
-- Audit log (paginated)
-- IdP configuration UI
-- Build + bundle into server's static directory
-
-### Phase 9 — Bug Fixes and Polish
-_Goal: Production-ready._
+### Phase 11 — Hardening and Operations
+_Goal: Production-grade observability, security, and deployability._
 
 - Fix `util.ts:74` backup restore
 - `FileOverwriteWarningModal` for remote file conflicts
 - Fix extension array management in `main.ts`
-- Structured logging (Pino) on server
-- Rate limiting on auth and invite endpoints
-- Health endpoint (`GET /health`)
-- TypeScript strictness improvements (reduce `@ts-expect-error` usage)
+- Structured logging (Pino) with correlation IDs on server
+- Rate limiting on auth, invite, and SCIM endpoints
+- Health endpoint (`GET /health`) with database and LevelDB connectivity checks
+- Metrics endpoint (`GET /metrics`) in Prometheus format — for corporate monitoring
+- TypeScript strictness improvements
 - First-run bootstrap (initial admin account)
-- Deployment documentation + Caddy example config
+- TLS minimum version configuration
+- Network isolation documentation (`docs/deployment/network-policy.md`) with Kubernetes NetworkPolicy and firewall examples
+- Container image signing and SBOM publication
+- Deployment documentation: Caddy (public TLS), nginx (internal CA), Kubernetes helm chart skeleton
 
 ---
 
 ## 10. Open Questions
 
-These are unresolved decisions to revisit before or during implementation.
+Resolved decisions are included for rationale. Genuinely open items are marked **Open**.
 
-| Question | Options | Notes |
+| Question | Decision | Rationale |
 |---|---|---|
-| Should refresh tokens be rotated on each use? | Yes (more secure) / No (simpler) | `node-oidc-provider` supports rotation; recommended for security |
-| Invite link format — server URL or opaque token? | `https://server/join?token=uuid` vs short code | URL is more user-friendly; short code works for non-browser paste into plugin |
-| Should `openToOrg` rooms be visible in plugin's "Available rooms" list before the user has ever connected? | Yes / No | Yes is more discoverable; implementation is straightforward |
-| Multi-instance server scaling | Redis pub/sub for WS broadcast | Not needed for v1; document as a known limitation |
-| Access token denylist for immediate revocation | PostgreSQL denylist / Skip | Skip for v1; document the 1-hour window |
-| Should the plugin support multiple server accounts? | Yes / No | Useful for consultants working across client orgs; significant complexity. Defer. |
-| Mobile (iOS/Android) support | `obsidian://` protocol handler availability on mobile | Needs investigation. The WebSocket provider works; OAuth callback may not. |
-| E2E encryption of Yjs updates | Encrypt before sending to server | Server would not see plaintext. Complex; breaks server-side persistence and audit. Significant future work. |
+| Should refresh tokens be rotated on each use? | **Yes** | `node-oidc-provider` supports rotation natively. Rotating tokens limit the blast radius of a stolen refresh token to a single use. Required for enterprise security posture. |
+| Invite link format | **`https://server/join?token=uuid`** | URL is directly clickable. Users can also paste it into the plugin's Join tab. |
+| Should `openToOrg` rooms appear in "Available rooms" before the user connects? | **Yes** | More discoverable; implementation is straightforward. |
+| Multi-instance server scaling | **Document as limitation in v1** | Requires Redis pub/sub for WS broadcast. Not needed for most enterprise deployments (single instance handles thousands of concurrent users). Document clearly; implement when a customer needs it. |
+| Access token denylist for immediate revocation | **Required — implemented via `Session` table** | Enterprise deprovisioning cannot wait up to 1 hour. The `sessionId` claim in access tokens is checked against `Session.revokedAt` on every protected request. This is not optional. |
+| Should the plugin support multiple server accounts? | **No (v1)** | Significant complexity. The target user has one corporate account. Defer indefinitely unless a clear enterprise use case emerges. |
+| Mobile (iOS/Android) support | **Non-goal** | `obsidian://` protocol handler may not work on mobile. The WebSocket provider would work but the OAuth flow is uncertain. Defer. |
+| E2E encryption of Yjs updates | **Non-goal (v1)** | Server sees plaintext — required for server-side persistence and audit. The security model is: the server is inside the corporate perimeter and trusted. E2E encryption would break audit and conflict resolution. Document this explicitly. |
+| **Open:** Audit log retention enforcement | **Open** | Default 2 years. Should retention be configurable per-event-type (e.g., longer for `USER_DEACTIVATED`)? Probably not needed for v1. |
+| **Open:** SIEM push vs pull | **Open** | Current design is pull (admin exports or schedules a cron). Should we add a webhook or syslog push mode? Many enterprises prefer push. Consider for v1 if early customers request it. |
+| **Open:** Kubernetes-native deployment | **Open** | Docker Compose is sufficient for many enterprise deployments. A Helm chart would help larger orgs. Skeleton provided in Phase 11; full chart deferred. |
