@@ -127,7 +127,7 @@ export default class Multiplayer extends Plugin {
             sharedDoc.onceSynced().then(() => {
               view.editor.setValue(sharedDoc.text)
               this.registerEditorExtension(extensions)
-              app.workspace.updateOptions()
+              this.app.workspace.updateOptions()
               console.log("binding yjs")
             })
           }
