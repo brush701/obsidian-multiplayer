@@ -81,7 +81,7 @@ export class SharedFolderModal extends Modal {
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))
-            this.plugin.addIcons()
+            this.plugin.refreshIconStyles()
             this.close();
           }
         })
@@ -117,7 +117,7 @@ export class UnshareFolderModal extends Modal {
         this.plugin.settings.sharedFolders = this.plugin.settings.sharedFolders.filter(el => el.path !== sharedFolder.settings.path)
         this.plugin.sharedFolders = this.plugin.sharedFolders.filter(el => el.settings.path !== sharedFolder.settings.path)
         this.plugin.saveSettings()
-        this.plugin.removeIcon(this.folder.settings.path)
+        this.plugin.refreshIconStyles()
         this.folder.docs.forEach(doc => {
           doc.close()
           doc.destroy()

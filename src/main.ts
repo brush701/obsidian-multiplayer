@@ -34,13 +34,14 @@ const DEFAULT_SETTINGS: MultiplayerSettings = {
   username: "Anonymous"
 };
 
-const icon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`
+const ICON_SVG_URI = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='18' cy='5' r='3'%3E%3C/circle%3E%3Ccircle cx='6' cy='12' r='3'%3E%3C/circle%3E%3Ccircle cx='18' cy='19' r='3'%3E%3C/circle%3E%3Cline x1='8.59' y1='13.51' x2='15.42' y2='17.49'%3E%3C/line%3E%3Cline x1='15.41' y1='6.51' x2='8.59' y2='10.49'%3E%3C/line%3E%3C/svg%3E")`
 
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
   sharedFolders: SharedFolder[];
   pwMgr: PasswordManager
   private _extensions: Extension[];
+  private _iconStyleEl: HTMLStyleElement | null = null;
 
   async onload() {
     console.log("loading multiplayer");
@@ -185,55 +186,31 @@ export default class Multiplayer extends Plugin {
     // register the patches with Obsidian's register method so that it gets unloaded properly
     this.register(patchOnUnloadFile);
   
-    this.app.workspace.onLayoutReady(() => this.addIcons());
-    this.registerEvent(this.app.workspace.on('layout-change', () => this.addIcons()));
+    this.refreshIconStyles();
   }
 
-  addIcons() {
-    const fileExplorers = this.app.workspace.getLeavesOfType('file-explorer')
-    fileExplorers.forEach(fileExplorer => {
-      this.sharedFolders.forEach(folder => {
-        //@ts-expect-error
-        const fileItem = fileExplorer.view.fileItems[folder.settings.path];
-        if (fileItem) {
-          const titleEl = fileItem.titleEl;
-          const titleInnerEl = fileItem.titleInnerEl;
-
-          // needs to check because of the refreshing the plugin will duplicate all the icons
-          if (titleEl.children.length === 2 || titleEl.children.length === 1) {
-              const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
-              if (existingIcon) {
-                existingIcon.remove();
-              }
-
-              const iconNode = titleEl.createDiv();
-              iconNode.classList.add('obsidian-icon-multiplayer');
-
-              iconNode.innerHTML = icon 
-
-              titleEl.insertBefore(iconNode, titleInnerEl);
-            }
-          }
-        })
-      })
-  }
-
-  removeIcon(path: string) {
-    const fileExplorers = this.app.workspace.getLeavesOfType('file-explorer')
-    fileExplorers.forEach(fileExplorer => {
-      //@ts-expect-error
-      const fileItem = fileExplorer.view.fileItems[path];
-      if (fileItem) {
-        const titleEl = fileItem.titleEl;
-        const titleInnerEl = fileItem.titleInnerEl;
-
-
-        const existingIcon = titleEl.querySelector('.obsidian-icon-multiplayer');
-        if (existingIcon) {
-          existingIcon.remove();
-        }
-      }
-    })
+  refreshIconStyles() {
+    if (!this._iconStyleEl) {
+      this._iconStyleEl = document.head.createEl('style');
+    }
+    this._iconStyleEl.textContent = this.sharedFolders.map(folder => {
+      const path = CSS.escape(folder.settings.path);
+      return `.nav-folder-title[data-path="${path}"]::before {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: middle;
+  background-color: currentColor;
+  mask-image: ${ICON_SVG_URI};
+  -webkit-mask-image: ${ICON_SVG_URI};
+  mask-size: contain;
+  -webkit-mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+}`;
+    }).join('\n');
   }
 
   getSharedFolder(path: string) : SharedFolder {
@@ -246,6 +223,7 @@ export default class Multiplayer extends Plugin {
 
   onunload() {
     this.sharedFolders.forEach(sharedFolder => { sharedFolder.destroy() })
+    this._iconStyleEl?.remove();
     console.log("unloading plugin");
     this.saveSettings()
   }
