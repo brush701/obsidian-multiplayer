@@ -99,6 +99,7 @@ export interface IAuthManager {
   signIn(): Promise<void>
   signOut(): Promise<void>
   getAccessToken(): Promise<string | null>
+  handleAuthCallback(params: Record<string, string>): void
   readonly isAuthenticated: boolean
   readonly userInfo: { email: string; name: string } | null
   on(event: 'auth-changed', handler: () => void): void

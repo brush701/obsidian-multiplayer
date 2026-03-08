@@ -29,6 +29,7 @@ export interface AuthManagerMock extends IAuthManager {
   signIn: ReturnType<typeof vi.fn>
   signOut: ReturnType<typeof vi.fn>
   getAccessToken: ReturnType<typeof vi.fn>
+  handleAuthCallback: ReturnType<typeof vi.fn>
   on: ReturnType<typeof vi.fn>
   off: ReturnType<typeof vi.fn>
 }
@@ -42,6 +43,7 @@ export function makeAuthManagerMock(
     signIn: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
     signOut: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
     getAccessToken: vi.fn<[], Promise<string | null>>().mockResolvedValue(null),
+    handleAuthCallback: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
     ...overrides,

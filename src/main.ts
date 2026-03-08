@@ -45,6 +45,10 @@ export default class Multiplayer extends Plugin {
   }
 
   setup() {
+    this.registerObsidianProtocolHandler('multiplayer/callback', (params) => {
+      this.authManager.handleAuthCallback(params as Record<string, string>)
+    })
+
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
         // Add a menu item to the folder context menu to create a board

@@ -15,6 +15,7 @@ export class Plugin {
   registerEvent(_event: unknown): void {}
   register(_fn: unknown): void {}
   registerEditorExtension(_ext: unknown): void {}
+  registerObsidianProtocolHandler(_action: string, _handler: unknown): void {}
 }
 
 export class PluginSettingTab {
