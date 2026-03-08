@@ -19,6 +19,9 @@
     ]
   },
   "include": [
-    "**/*.ts"
-, "test/server/server.js"  ]
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "test"
+  ]
 }

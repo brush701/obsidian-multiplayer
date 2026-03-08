@@ -52,7 +52,6 @@ export class TFolder {
 }
 
 export class MarkdownView {
-  static prototype: MarkdownView
 }
 
 export class FileSystemAdapter {
