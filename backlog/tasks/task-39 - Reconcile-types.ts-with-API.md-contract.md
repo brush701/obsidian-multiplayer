@@ -4,7 +4,7 @@ title: Reconcile types.ts with API.md contract
 status: Done
 assignee: []
 created_date: '2026-03-08 18:17'
-updated_date: '2026-03-08 19:31'
+updated_date: '2026-03-08 19:32'
 labels:
   - enhancement
   - tech-debt
@@ -14,7 +14,7 @@ references:
   - ~/dev/tektite-server/API.md
   - src/types.ts
 priority: high
-ordinal: 5000
+ordinal: 6000
 ---
 
 ## Description
