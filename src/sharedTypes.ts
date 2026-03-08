@@ -1,12 +1,10 @@
 'use strict';
 
 import * as Y from 'yjs'
-import { WebrtcProvider } from 'y-webrtc'
 
 import { yCollab } from 'y-codemirror.next'
 import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import * as random from 'lib0/random'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
 import { dirname } from 'path';
@@ -14,7 +12,6 @@ import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
   path: string
-  signalingServers: string[]
 }
 
 const usercolors = [
@@ -35,18 +32,16 @@ const usercolors = [
   plugin: Multiplayer
 
   private _persistence: IndexeddbPersistence
-  private _provider: WebrtcProvider
   private _vaultRoot:string
- 
+
   constructor(settings: SharedTypeSettings, vaultRoot: string, plugin: Multiplayer) {
-    this.plugin = plugin  
+    this.plugin = plugin
     this._vaultRoot = vaultRoot + "/"
     this.settings = settings
     this.root = new Y.Doc()
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
-    this._provider = new WebrtcProvider(settings.guid, this.root, {signaling: settings.signalingServers})
     this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((guid, path) => {
@@ -159,23 +154,13 @@ const usercolors = [
 export class SharedDoc {
   guid: string
   private _parent: SharedFolder
-  private _provider: WebrtcProvider;
   private _binding: Extension;
 
     public get binding(): Extension {
         if (!this._binding) {
-            const userColor = usercolors[random.uint32() % usercolors.length]
-
             const yText = this.ydoc.getText('contents')
             const undoManager = new Y.UndoManager(yText)
-
-            this._provider.awareness.setLocalStateField('user', {
-                name: this._parent.plugin.settings.username,
-                color: userColor.color,
-                colorLight: userColor.light
-            })
-
-            this._binding = yCollab(yText, this._provider.awareness, { undoManager })
+            this._binding = yCollab(yText, null, { undoManager })
         }
         return this._binding;
     }
@@ -195,10 +180,8 @@ export class SharedDoc {
     this._parent = parent
     this.ydoc = new Y.Doc()
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
-    this._provider = new WebrtcProvider(guid, this.ydoc, {signaling: parent.settings.signalingServers})
     this.path = path
     this.guid = guid
-    this.connect()
   }
 
   /**
@@ -213,29 +196,18 @@ export class SharedDoc {
 
 
   connect() {
-    if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc) 
-    if(!this._provider) this._provider = new WebrtcProvider(this.guid, this.ydoc, {signaling: this._parent.settings.signalingServers})
-    if (!this._provider.connected)
-        this._provider.connect()
+    if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc)
   }
 
-  // This method cleanly disconnects the underlying provider. It is
-  // preferred b/c the getter will auto reconnect
+  // This method cleanly tears down the doc's persistence and binding.
   close() {
-    this._provider.disconnect()
-    this._provider.destroy()
-    this._provider = null
-
     this._binding = null
 
     this._persistence.destroy()
     this._persistence = undefined
-  } 
+  }
 
   destroy() {
-    if (this._provider) {
-      this._provider.destroy()
-    }
     if (this._persistence) {
       this._persistence.destroy()
     }

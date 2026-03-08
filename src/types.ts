@@ -27,7 +27,6 @@ export interface RoomSummary {
 // Full details of a room including its member list.
 export interface RoomDetail extends RoomSummary {
   members: RoomMember[]
-  signalingServers: string[]
   encryptionEnabled: boolean
 }
 
@@ -52,7 +51,7 @@ export interface AuthManager {
 export interface ApiClient {
   listRooms(): Promise<RoomSummary[]>
   getRoom(id: string): Promise<RoomDetail>
-  createRoom(name: string, signalingServers: string[]): Promise<RoomSummary>
+  createRoom(name: string): Promise<RoomSummary>
   deleteRoom(id: string): Promise<void>
   addMember(roomId: string, userId: string, role: RoomMember['role']): Promise<RoomMember>
   removeMember(roomId: string, userId: string): Promise<void>

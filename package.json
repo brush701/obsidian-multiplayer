@@ -30,7 +30,6 @@
 		"y-indexeddb": "^9.0.9",
 		"y-leveldb": "^0.1.1",
 		"y-protocols": "^1.0.5",
-		"y-webrtc": "^10.2.3",
 		"yjs": "^13.5.43"
 	}
 }
