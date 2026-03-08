@@ -5,9 +5,11 @@
 import type { SharedTypeSettings } from '../src/sharedTypes'
 import type {
   MultiplayerSettings,
-  RoomSummary,
+  RoomListItem,
   RoomDetail,
   RoomMember,
+  CreateRoomResult,
+  JoinResult,
 } from '../src/types'
 
 // ── SharedTypeSettings ────────────────────────────────────────────────────────
@@ -43,24 +45,23 @@ export function makeRoomMember(
 ): RoomMember {
   return {
     userId: 'user-001',
-    username: 'alice',
-    role: 'editor',
-    joinedAt: 1_700_000_000_000,
+    email: 'alice@test.com',
+    name: 'Alice',
+    role: 'EDITOR',
     ...overrides,
   }
 }
 
-// ── RoomSummary ───────────────────────────────────────────────────────────────
+// ── RoomListItem ──────────────────────────────────────────────────────────────
 
-export function makeRoomSummary(
-  overrides: Partial<RoomSummary> = {}
-): RoomSummary {
+export function makeRoomListItem(
+  overrides: Partial<RoomListItem> = {}
+): RoomListItem {
   return {
-    id: 'room-001',
+    guid: 'room-001',
     name: 'Test Room',
-    ownerUsername: 'alice',
-    memberCount: 1,
-    createdAt: 1_700_000_000_000,
+    role: 'OWNER',
+    orgId: 'org-001',
     ...overrides,
   }
 }
@@ -71,13 +72,36 @@ export function makeRoomDetail(
   overrides: Partial<RoomDetail> = {}
 ): RoomDetail {
   return {
-    id: 'room-001',
+    guid: 'room-001',
     name: 'Test Room',
-    ownerUsername: 'alice',
-    memberCount: 1,
-    createdAt: 1_700_000_000_000,
+    orgId: 'org-001',
+    openToOrg: false,
     members: [makeRoomMember()],
-    encryptionEnabled: true,
+    ...overrides,
+  }
+}
+
+// ── CreateRoomResult ──────────────────────────────────────────────────────────
+
+export function makeCreateRoomResult(
+  overrides: Partial<CreateRoomResult> = {}
+): CreateRoomResult {
+  return {
+    guid: 'room-001',
+    name: 'Test Room',
+    orgId: 'org-001',
+    ...overrides,
+  }
+}
+
+// ── JoinResult ────────────────────────────────────────────────────────────────
+
+export function makeJoinResult(
+  overrides: Partial<JoinResult> = {}
+): JoinResult {
+  return {
+    guid: 'room-001',
+    name: 'Test Room',
     ...overrides,
   }
 }

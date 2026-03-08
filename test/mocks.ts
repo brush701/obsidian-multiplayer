@@ -13,11 +13,15 @@ import { vi } from 'vitest'
 import type {
   IAuthManager,
   ApiClient,
-  RoomSummary,
-  RoomDetail,
   RoomMember,
 } from '../src/types'
-import { makeRoomSummary, makeRoomDetail, makeRoomMember } from './factories'
+import {
+  makeRoomListItem,
+  makeRoomDetail,
+  makeRoomMember,
+  makeCreateRoomResult,
+  makeJoinResult,
+} from './factories'
 
 // ── AuthManager mock ──────────────────────────────────────────────────────────
 
@@ -54,12 +58,17 @@ export function makeApiClientMock(
   overrides: Partial<ApiClientMock> = {}
 ): ApiClientMock {
   return {
-    listRooms: vi.fn<[], Promise<RoomSummary[]>>().mockResolvedValue([makeRoomSummary()]),
-    getRoom: vi.fn<[string], Promise<RoomDetail>>().mockResolvedValue(makeRoomDetail()),
-    createRoom: vi.fn<[string, string[]], Promise<RoomSummary>>().mockResolvedValue(makeRoomSummary()),
-    deleteRoom: vi.fn<[string], Promise<void>>().mockResolvedValue(undefined),
-    addMember: vi.fn<[string, string, RoomMember['role']], Promise<RoomMember>>().mockResolvedValue(makeRoomMember()),
-    removeMember: vi.fn<[string, string], Promise<void>>().mockResolvedValue(undefined),
+    getVersion: vi.fn().mockResolvedValue({ server: '1.0.0', apiVersion: '1', minPluginVersion: '1.0.0' }),
+    listRooms: vi.fn().mockResolvedValue([makeRoomListItem()]),
+    createRoom: vi.fn().mockResolvedValue(makeCreateRoomResult()),
+    getRoom: vi.fn().mockResolvedValue(makeRoomDetail()),
+    deleteRoom: vi.fn().mockResolvedValue(undefined),
+    getMyRole: vi.fn().mockResolvedValue({ role: 'EDITOR' }),
+    joinRoom: vi.fn().mockResolvedValue(makeJoinResult()),
+    createInvite: vi.fn().mockResolvedValue({ inviteUrl: 'https://example.com/join?token=abc' }),
+    revokeInvite: vi.fn().mockResolvedValue(undefined),
+    updateMemberRole: vi.fn().mockResolvedValue({ userId: 'user-001', role: 'VIEWER' }),
+    removeMember: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
