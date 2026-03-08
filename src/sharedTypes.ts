@@ -5,6 +5,7 @@ import * as Y from 'yjs'
 import { yCollab } from 'y-codemirror.next'
 import { Extension} from '@codemirror/state'
 import { IndexeddbPersistence } from 'y-indexeddb'
+import { WebsocketProvider } from 'y-websocket'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
 import { dirname } from 'path';
@@ -33,6 +34,7 @@ const usercolors = [
   plugin: Multiplayer
 
   private _persistence: IndexeddbPersistence
+  private _provider: WebsocketProvider
   private _vaultRoot:string
 
   constructor(settings: SharedTypeSettings, vaultRoot: string, plugin: Multiplayer) {
@@ -43,6 +45,11 @@ const usercolors = [
     this.ids = this.root.getMap("docs")
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
+
+    const wsUrl = `${plugin.settings.serverUrl}/room/${settings.guid}`
+    this._provider = new WebsocketProvider(wsUrl, settings.guid, this.root, { connect: false })
+    // TODO(P2): attach token
+    this._provider.connect()
     this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((guid, path) => {
@@ -147,7 +154,7 @@ const usercolors = [
       doc.destroy()
       this.docs.delete(doc.guid)
     })
-
+    this._provider.destroy()
   }
 
 }
@@ -161,12 +168,13 @@ export class SharedDoc {
         if (!this._binding) {
             const yText = this.ydoc.getText('contents')
             const undoManager = new Y.UndoManager(yText)
-            this._binding = yCollab(yText, null, { undoManager })
+            this._binding = yCollab(yText, this._provider.awareness, { undoManager })
         }
         return this._binding;
     }
 
   private _persistence: IndexeddbPersistence
+  private _provider: WebsocketProvider
   ydoc: Y.Doc
   path: string
   username: string
@@ -183,6 +191,19 @@ export class SharedDoc {
     this._persistence = new IndexeddbPersistence(guid, this.ydoc)
     this.path = path
     this.guid = guid
+
+    const serverUrl = parent.plugin.settings.serverUrl
+    const wsUrl = `${serverUrl}/room/${guid}`
+    this._provider = new WebsocketProvider(wsUrl, guid, this.ydoc, { connect: false })
+    // TODO(P2): attach token
+    this._provider.connect()
+
+    const userColor = usercolors[Math.floor(Math.random() * usercolors.length)]
+    this._provider.awareness.setLocalStateField('user', {
+      name: parent.plugin.settings.username,
+      color: userColor.color,
+      colorLight: userColor.light
+    })
   }
 
   /**
@@ -200,15 +221,17 @@ export class SharedDoc {
     if (!this._persistence) this._persistence = new IndexeddbPersistence(this.guid, this.ydoc)
   }
 
-  // This method cleanly tears down the doc's persistence and binding.
+  // This method cleanly tears down the doc's persistence, provider, and binding.
   close() {
     this._binding = null
 
+    this._provider.destroy()
     this._persistence.destroy()
     this._persistence = undefined
   }
 
   destroy() {
+    this._provider?.destroy()
     if (this._persistence) {
       this._persistence.destroy()
     }
