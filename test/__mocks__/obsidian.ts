@@ -59,8 +59,22 @@ export class ButtonComponent {
   onClick(_cb: (_e: unknown) => void): this { return this }
 }
 
+export class Modal {
+  app: App
+  contentEl: HTMLElement
+  modalEl: HTMLElement
+  constructor(app: App) {
+    this.app = app
+    this.contentEl = { empty: () => {}, createEl: () => ({}), createDiv: () => ({}) } as unknown as HTMLElement
+    this.modalEl = { addClass: () => {} } as unknown as HTMLElement
+  }
+  open(): void {}
+  close(): void {}
+}
+
 export class Notice {
-  constructor(_message: string) {}
+  message: string
+  constructor(message: string) { this.message = message }
 }
 
 export class TFile {
@@ -70,7 +84,11 @@ export class TFile {
 
 export class TFolder {
   path: string
-  constructor(path: string) { this.path = path }
+  name: string
+  constructor(path: string) {
+    this.path = path
+    this.name = path.split('/').pop() ?? path
+  }
 }
 
 export class MarkdownView {

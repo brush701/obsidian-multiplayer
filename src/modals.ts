@@ -3,12 +3,9 @@ import  Multiplayer from "./main"
 import { SharedFolder } from "./sharedTypes";
 import { AuthRequiredError, ApiRequestError } from "./api";
 
-type TabName = 'create' | 'join';
-
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
   folder: TFolder;
-  private activeTab: TabName = 'create';
   private createContentEl: HTMLElement;
   private joinContentEl: HTMLElement;
   private roomNameInput: HTMLInputElement;
@@ -54,8 +51,7 @@ export class SharedFolderModal extends Modal {
     this.roomNameInput.focus();
   }
 
-  private switchTab(tab: TabName, createTab: HTMLElement, joinTab: HTMLElement) {
-    this.activeTab = tab;
+  private switchTab(tab: 'create' | 'join', createTab: HTMLElement, joinTab: HTMLElement) {
     if (tab === 'create') {
       createTab.addClass('multiplayer-tab-active');
       joinTab.removeClass('multiplayer-tab-active');
@@ -111,10 +107,13 @@ export class SharedFolderModal extends Modal {
     this.createBtn.disabled = isEmpty;
   }
 
+  private _creating = false;
+
   private async handleCreate() {
     const roomName = this.roomNameInput.value.trim();
-    if (!roomName) return;
+    if (!roomName || this._creating) return;
 
+    this._creating = true;
     this.createBtn.disabled = true;
     this.createBtn.textContent = 'Creating…';
 
@@ -124,10 +123,8 @@ export class SharedFolderModal extends Modal {
       const settings = { guid: result.guid, name: result.name, path };
       this.plugin.settings.sharedFolders.push(settings);
       await this.plugin.saveSettings();
-      this.plugin.sharedFolders.push(
-        new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin)
-      );
-      this.plugin.refreshIconStyles();
+      const newFolder = new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin);
+      this.plugin.addSharedFolder(newFolder);
       this.close();
     } catch (e) {
       if (e instanceof AuthRequiredError) {
@@ -137,6 +134,7 @@ export class SharedFolderModal extends Modal {
       } else {
         new Notice('Could not create room: unexpected error.');
       }
+      this._creating = false;
       this.createBtn.disabled = false;
       this.createBtn.textContent = 'Create Room';
       this.updateCreateBtnState();
