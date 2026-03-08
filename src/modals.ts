@@ -1,11 +1,15 @@
-import { Modal, TFolder, App, FileSystemAdapter } from "obsidian";
+import { Modal, TFolder, App, FileSystemAdapter, Notice } from "obsidian";
 import  Multiplayer from "./main"
-import { randomUUID } from "crypto";
 import { SharedFolder } from "./sharedTypes";
+import { AuthRequiredError, ApiRequestError } from "./api";
 
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
   folder: TFolder;
+  private createContentEl: HTMLElement;
+  private joinContentEl: HTMLElement;
+  private roomNameInput: HTMLInputElement;
+  private createBtn: HTMLButtonElement;
 
   constructor(app: App, plugin: Multiplayer, folder: TFolder) {
     super(app);
@@ -17,54 +21,131 @@ export class SharedFolderModal extends Modal {
     const { contentEl, modalEl } = this;
     modalEl.addClass('modal-style-multiplayer');
     contentEl.empty();
-    const sharedFolder = this.plugin.sharedFolders.find(sharedFolder => this.folder.path.contains(sharedFolder.settings.path))
+
+    const sharedFolder = this.plugin.sharedFolders.find(sf => this.folder.path.contains(sf.settings.path));
     if (sharedFolder) {
       contentEl.createEl("h2", { text: "SharedFolder already exists" });
-      contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'})
-      const button = contentEl.createEl('button', { text: 'OK', attr: { class: 'btn btn-ok' } })
-      button.onClickEvent((ev) => {
-        this.close()
-      })
-    } else {
-      contentEl.createEl("h2", { text: "Create a new sharedFolder" });
-      contentEl.createEl("form", "form-multiplayer",
-        (form) => {
-          form.createEl("label", {
-            attr: { for: "sharedFolder-guid" },
-            text: "Optional GUID: "
-          })
-
-          form.createEl("input", {
-            type: "text",
-            attr: {
-              name: "guid",
-              id: "sharedFolder-guid"
-            },
-            placeholder: "SharedFolder GUID",
-          });
-
-          form.createEl("br")
-          form.createEl("br")
-
-          form.createEl("button", {
-            text: "Create",
-            type: "submit",
-          });
-          form.onsubmit = async (e) => {
-            e.preventDefault();
-            // @ts-expect-error, not typed
-            const guid = form.querySelector('input[name="guid"]').value || randomUUID()
-
-            const path = this.folder.path
-            const settings = { guid: guid, path: path, name: '' }
-            this.plugin.settings.sharedFolders.push(settings)
-            this.plugin.saveSettings();
-            this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))
-            this.plugin.refreshIconStyles()
-            this.close();
-          }
-        })
+      contentEl.createEl('p', { text: 'This folder is already a multiplayer sharedFolder.'});
+      const button = contentEl.createEl('button', { text: 'OK', attr: { class: 'btn btn-ok' } });
+      button.onClickEvent(() => this.close());
+      return;
     }
+
+    // Tab bar
+    const tabBar = contentEl.createDiv({ cls: 'multiplayer-tab-bar' });
+    const createTab = tabBar.createEl('button', { text: 'Create', cls: 'multiplayer-tab multiplayer-tab-active' });
+    const joinTab = tabBar.createEl('button', { text: 'Join', cls: 'multiplayer-tab' });
+
+    // Tab content containers
+    this.createContentEl = contentEl.createDiv({ cls: 'multiplayer-tab-content' });
+    this.joinContentEl = contentEl.createDiv({ cls: 'multiplayer-tab-content' });
+    this.joinContentEl.style.display = 'none';
+
+    createTab.onClickEvent(() => this.switchTab('create', createTab, joinTab));
+    joinTab.onClickEvent(() => this.switchTab('join', createTab, joinTab));
+
+    this.renderCreateTab();
+    this.renderJoinTab();
+
+    // Focus room name input
+    this.roomNameInput.focus();
+  }
+
+  private switchTab(tab: 'create' | 'join', createTab: HTMLElement, joinTab: HTMLElement) {
+    if (tab === 'create') {
+      createTab.addClass('multiplayer-tab-active');
+      joinTab.removeClass('multiplayer-tab-active');
+      this.createContentEl.style.display = '';
+      this.joinContentEl.style.display = 'none';
+      this.roomNameInput.focus();
+    } else {
+      joinTab.addClass('multiplayer-tab-active');
+      createTab.removeClass('multiplayer-tab-active');
+      this.joinContentEl.style.display = '';
+      this.createContentEl.style.display = 'none';
+    }
+  }
+
+  private renderCreateTab() {
+    const el = this.createContentEl;
+
+    const nameLabel = el.createEl('label', { text: 'Room name' });
+    nameLabel.style.display = 'block';
+    nameLabel.style.marginBottom = '4px';
+    nameLabel.style.marginTop = '12px';
+
+    this.roomNameInput = el.createEl('input', {
+      type: 'text',
+      placeholder: 'Enter a room name',
+      cls: 'multiplayer-room-name-input',
+    });
+    this.roomNameInput.style.width = '100%';
+
+    // Pre-fill with folder name
+    const folderName = this.folder.name;
+    if (folderName) {
+      this.roomNameInput.value = folderName;
+    }
+
+    const btnContainer = el.createDiv();
+    btnContainer.style.marginTop = '12px';
+
+    this.createBtn = btnContainer.createEl('button', {
+      text: 'Create Room',
+      cls: 'mod-cta',
+    });
+
+    this.updateCreateBtnState();
+
+    this.roomNameInput.addEventListener('input', () => this.updateCreateBtnState());
+
+    this.createBtn.onClickEvent(() => this.handleCreate());
+  }
+
+  private updateCreateBtnState() {
+    const isEmpty = !this.roomNameInput.value.trim();
+    this.createBtn.disabled = isEmpty;
+  }
+
+  private _creating = false;
+
+  private async handleCreate() {
+    const roomName = this.roomNameInput.value.trim();
+    if (!roomName || this._creating) return;
+
+    this._creating = true;
+    this.createBtn.disabled = true;
+    this.createBtn.textContent = 'Creating…';
+
+    try {
+      const result = await this.plugin.apiClient.createRoom(roomName);
+      const path = this.folder.path;
+      const settings = { guid: result.guid, name: result.name, path };
+      this.plugin.settings.sharedFolders.push(settings);
+      await this.plugin.saveSettings();
+      const newFolder = new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin);
+      this.plugin.addSharedFolder(newFolder);
+      this.close();
+    } catch (e) {
+      if (e instanceof AuthRequiredError) {
+        new Notice('Sign in first.');
+      } else if (e instanceof ApiRequestError) {
+        new Notice(`Could not create room: ${e.message}`);
+      } else {
+        new Notice('Could not create room: unexpected error.');
+      }
+      this._creating = false;
+      this.createBtn.disabled = false;
+      this.createBtn.textContent = 'Create Room';
+      this.updateCreateBtnState();
+    }
+  }
+
+  private renderJoinTab() {
+    this.joinContentEl.createEl('p', {
+      text: 'Join tab coming soon.',
+      cls: 'multiplayer-placeholder',
+    });
   }
 
   onClose() {

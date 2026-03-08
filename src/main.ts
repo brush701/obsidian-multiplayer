@@ -245,6 +245,13 @@ export default class Multiplayer extends Plugin {
     folder.offStatusChange(this._statusChangeHandler)
   }
 
+  addSharedFolder(folder: SharedFolder): void {
+    this._attachStatusListeners(folder)
+    this.sharedFolders.push(folder)
+    this.refreshIconStyles()
+    this._updateStatusBar()
+  }
+
   getSharedFolder(path: string) : SharedFolder {
 
     return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
