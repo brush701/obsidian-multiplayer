@@ -49,6 +49,16 @@ export default class Multiplayer extends Plugin {
       this.authManager.handleAuthCallback(params as Record<string, string>)
     })
 
+    this.authManager.on('auth-changed', () => {
+      if (!this.authManager.isAuthenticated) {
+        this.sharedFolders.forEach(f => f.destroy())
+        this.sharedFolders = []
+        this._extensions.length = 0
+        this.app.workspace.updateOptions()
+        this.refreshIconStyles()
+      }
+    })
+
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file: TFile) => {
         // Add a menu item to the folder context menu to create a board
@@ -232,5 +242,19 @@ class MultiplayerSettingTab extends PluginSettingTab {
       }
       )
 
+    if (this.plugin.authManager.isAuthenticated) {
+      const userInfo = this.plugin.authManager.userInfo
+      new Setting(containerEl)
+        .setName('Signed in')
+        .setDesc(`Signed in as ${userInfo?.email ?? 'unknown'}`)
+        .addButton(btn => {
+          btn.setButtonText('Sign Out')
+            .setWarning()
+            .onClick(async () => {
+              await this.plugin.authManager.signOut()
+              this.display()
+            })
+        })
+    }
   }
 }

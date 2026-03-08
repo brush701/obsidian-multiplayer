@@ -1,7 +1,7 @@
 // Suite: AuthManager
 // Scope: Unit
 // Spec: TASK-8 — [P2-S1] AuthManager core + TASK-9 — [P2-S2] PKCE sign-in flow
-//        TASK-11 — [P2-S4] Silent token refresh
+//        TASK-11 — [P2-S4] Silent token refresh + TASK-12 — [P2-S5] Sign-out
 // What this suite validates:
 //   - Fresh instance starts unauthenticated with null userInfo and null token
 //   - signOut() resets state and emits auth-changed
@@ -112,19 +112,102 @@ describe('AuthManager', () => {
   })
 
   describe('signOut()', () => {
-    it('sets isAuthenticated to false and userInfo to null', async () => {
-      const auth = createAuthManager()
+    // Helper: set up an authenticated AuthManager for sign-out tests
+    function createSignedInManager(serverUrl = 'https://example.com') {
+      const app = new App()
+      const settings = makeMultiplayerSettings({ serverUrl })
+      const auth = new AuthManager(app, settings, { openUrl: openExternalStub })
+      const tokenStore = new TokenStore(app)
+
+      tokenStore.save({
+        accessToken: 'test-access-token',
+        refreshToken: 'test-refresh-token',
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        email: 'alice@company.com',
+        name: 'Alice Chen',
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authAny = auth as any
+      authAny._isAuthenticated = true
+      authAny._accessToken = 'test-access-token'
+      authAny._userInfo = { email: 'alice@company.com', name: 'Alice Chen' }
+
+      return { auth, tokenStore }
+    }
+
+    it('sets isAuthenticated to false', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      const { auth } = createSignedInManager()
+      expect(auth.isAuthenticated).toBe(true)
       await auth.signOut()
       expect(auth.isAuthenticated).toBe(false)
+    })
+
+    it('sets userInfo to null', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      const { auth } = createSignedInManager()
+      expect(auth.userInfo).not.toBeNull()
+      await auth.signOut()
       expect(auth.userInfo).toBeNull()
     })
 
-    it('emits auth-changed', async () => {
-      const auth = createAuthManager()
+    it('getAccessToken() returns null after signOut', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      const { auth } = createSignedInManager()
+      await auth.signOut()
+      const token = await auth.getAccessToken()
+      expect(token).toBeNull()
+    })
+
+    it('TokenStore.load() returns null after signOut', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      const { auth, tokenStore } = createSignedInManager()
+      expect(tokenStore.load()).not.toBeNull()
+      await auth.signOut()
+      expect(tokenStore.load()).toBeNull()
+    })
+
+    it('emits auth-changed exactly once', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      const { auth } = createSignedInManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
       await auth.signOut()
       expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('completes even when the logout endpoint fails', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+      const { auth, tokenStore } = createSignedInManager()
+      await auth.signOut()
+      expect(auth.isAuthenticated).toBe(false)
+      expect(auth.userInfo).toBeNull()
+      expect(tokenStore.load()).toBeNull()
+    })
+
+    it('sends fire-and-forget GET /auth/logout with Bearer token', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      const { auth } = createSignedInManager('https://auth.example.com')
+      await auth.signOut()
+
+      const logoutCall = fetchMock.mock.calls.find(
+        (c: [string, RequestInit?]) => c[0].includes('/auth/logout')
+      )
+      expect(logoutCall).toBeDefined()
+      expect(logoutCall![0]).toBe('https://auth.example.com/auth/logout')
+      expect(logoutCall![1].headers).toEqual({
+        Authorization: 'Bearer test-access-token',
+      })
+    })
+
+    it('does not send logout request when no access token exists', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      const auth = createAuthManager()
+      await auth.signOut()
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 
