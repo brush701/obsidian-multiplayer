@@ -35,7 +35,7 @@ describe('makeSharedTypeSettings', () => {
     expect(typeof s.guid).toBe('string')
     expect(s.guid.length).toBeGreaterThan(0)
     expect(typeof s.path).toBe('string')
-    expect(Array.isArray(s.signalingServers)).toBe(true)
+    expect(typeof s.name).toBe('string')
   })
 
   it('applies overrides', () => {

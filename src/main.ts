@@ -13,19 +13,16 @@ import {
 } from "obsidian";
 
 import { SharedFolder, SharedTypeSettings } from './sharedTypes'
+import { MultiplayerSettings } from './types'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
 import { SharedFolderModal, UnshareFolderModal } from "./modals";
 
-interface MultiplayerSettings {
-  sharedFolders: SharedTypeSettings[];
-  username: string
-}
-
 const DEFAULT_SETTINGS: MultiplayerSettings = {
+  serverUrl: '',
+  username: '',
   sharedFolders: [],
-  username: "Anonymous"
 };
 
 const ICON_SVG_URI = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='18' cy='5' r='3'%3E%3C/circle%3E%3Ccircle cx='6' cy='12' r='3'%3E%3C/circle%3E%3Ccircle cx='18' cy='19' r='3'%3E%3C/circle%3E%3Cline x1='8.59' y1='13.51' x2='15.42' y2='17.49'%3E%3C/line%3E%3Cline x1='15.41' y1='6.51' x2='8.59' y2='10.49'%3E%3C/line%3E%3C/svg%3E")`

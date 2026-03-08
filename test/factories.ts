@@ -19,7 +19,7 @@ export function makeSharedTypeSettings(
   return {
     guid: 'aaaaaaaa-0000-0000-0000-000000000001',
     path: 'shared-folder',
-    signalingServers: ['wss://signaling.example.com'],
+    name: '',
     ...overrides,
   }
 }
@@ -30,8 +30,9 @@ export function makeMultiplayerSettings(
   overrides: Partial<MultiplayerSettings> = {}
 ): MultiplayerSettings {
   return {
+    serverUrl: '',
+    username: '',
     sharedFolders: [],
-    username: 'Anonymous',
     ...overrides,
   }
 }
@@ -90,7 +91,6 @@ export function makeRoomDetail(
     memberCount: 1,
     createdAt: 1_700_000_000_000,
     members: [makeRoomMember()],
-    signalingServers: ['wss://signaling.example.com'],
     encryptionEnabled: true,
     ...overrides,
   }
