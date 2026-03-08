@@ -9,6 +9,7 @@ import { WebsocketProvider } from 'y-websocket'
 import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
 import { dirname } from 'path';
+import { Notice } from 'obsidian';
 import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
@@ -48,9 +49,11 @@ const usercolors = [
 
     const wsBase = `${plugin.settings.serverUrl}/room`
     this._provider = new WebsocketProvider(wsBase, settings.guid, this.root, { connect: false })
-    // TODO(P2): attach token
+    this._provider.on('connection-close', (event: CloseEvent) => {
+      this._handleCloseCode(event)
+    })
     if (plugin.settings.serverUrl) {
-      this._provider.connect()
+      this._connectWithAuth()
     }
     this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
@@ -150,6 +153,47 @@ const usercolors = [
 
   }
 
+  private async _connectWithAuth(): Promise<void> {
+    const token = await this.plugin.authManager.getAccessToken()
+    if (!token) {
+      new Notice('Not signed in — cannot connect to room.')
+      return
+    }
+    this._provider.params = { token }
+    this._provider.connect()
+  }
+
+  private _handleCloseCode(event: CloseEvent | null): void {
+    if (!event) return
+    switch (event.code) {
+      case 4001:
+        this._provider.disconnect()
+        new Notice('Session expired — please sign in again.')
+        this.plugin.authManager.signOut()
+        break
+      case 4003:
+        new Notice(`Access denied to ${this.settings.name}.`)
+        this._removeFromSettings()
+        break
+      case 4004:
+        new Notice(`Room '${this.settings.name}' no longer exists.`)
+        this._removeFromSettings()
+        break
+    }
+  }
+
+  private _removeFromSettings(): void {
+    this._provider.disconnect()
+    const idx = this.plugin.settings.sharedFolders.indexOf(this.settings)
+    if (idx !== -1) {
+      this.plugin.settings.sharedFolders.splice(idx, 1)
+    }
+    this.plugin.sharedFolders = this.plugin.sharedFolders.filter(f => f !== this)
+    this.destroy()
+    this.plugin.saveSettings()
+    this.plugin.refreshIconStyles()
+  }
+
   destroy()
   {
     this.docs.forEach(doc => {
@@ -197,9 +241,13 @@ export class SharedDoc {
     const serverUrl = parent.plugin.settings.serverUrl
     const wsBase = `${serverUrl}/room`
     this._provider = new WebsocketProvider(wsBase, guid, this.ydoc, { connect: false })
-    // TODO(P2): attach token
+    this._provider.on('connection-close', (event: CloseEvent) => {
+      if (event && (event.code === 4001 || event.code === 4003 || event.code === 4004)) {
+        this._provider.disconnect()
+      }
+    })
     if (serverUrl) {
-      this._provider.connect()
+      this._connectWithAuth()
     }
 
     const userColor = usercolors[Math.floor(Math.random() * usercolors.length)]
@@ -208,6 +256,13 @@ export class SharedDoc {
       color: userColor.color,
       colorLight: userColor.light
     })
+  }
+
+  private async _connectWithAuth(): Promise<void> {
+    const token = await this._parent.plugin.authManager.getAccessToken()
+    if (!token) return
+    this._provider.params = { token }
+    this._provider.connect()
   }
 
   /**
