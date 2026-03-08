@@ -37,7 +37,7 @@ export class AuthManager implements IAuthManager {
   private _settings: MultiplayerSettings
   private _deps: AuthManagerDeps
   private _tokenStore: TokenStore
-  private _isAuthenticated: boolean = false
+  private _isAuthenticated = false
   private _userInfo: { email: string; name: string } | null = null
   private _listeners: Set<() => void> = new Set()
 
@@ -50,6 +50,7 @@ export class AuthManager implements IAuthManager {
 
   // In-memory cache of tokens (persisted via TokenStore)
   private _accessToken: string | null = null
+  private _pendingRefresh: Promise<string | null> | null = null
 
   constructor(app: App, settings: MultiplayerSettings, deps: AuthManagerDeps = defaultDeps) {
     this._app = app
@@ -70,7 +71,26 @@ export class AuthManager implements IAuthManager {
     if (!this._isAuthenticated) {
       return null
     }
-    return this._accessToken
+
+    const tokens = this._tokenStore.load()
+    if (!tokens) {
+      return null
+    }
+
+    const msUntilExpiry = new Date(tokens.expiresAt).getTime() - Date.now()
+    if (msUntilExpiry > 60_000) {
+      return this._accessToken
+    }
+
+    // Token is near expiry or expired — refresh it
+    if (this._pendingRefresh) {
+      return this._pendingRefresh
+    }
+
+    this._pendingRefresh = this._refreshTokens(tokens.refreshToken).finally(() => {
+      this._pendingRefresh = null
+    })
+    return this._pendingRefresh
   }
 
   signIn(): Promise<void> {
@@ -175,15 +195,21 @@ export class AuthManager implements IAuthManager {
     const tokens = this._tokenStore.load()
     if (!tokens) return
 
-    const expiry = new Date(tokens.expiresAt)
-    if (expiry <= new Date()) {
-      this._tokenStore.clear()
-      return
+    // Restore user info and auth state first so _refreshTokens can work
+    this._userInfo = { email: tokens.email, name: tokens.name }
+    this._accessToken = tokens.accessToken
+    this._isAuthenticated = true
+
+    const msUntilExpiry = new Date(tokens.expiresAt).getTime() - Date.now()
+    if (msUntilExpiry <= 0) {
+      // Access token expired — try refresh (refresh token has 30-day sliding window)
+      const newToken = await this._refreshTokens(tokens.refreshToken)
+      if (!newToken) {
+        // _refreshTokens already called signOut() and emitted auth-changed
+        return
+      }
     }
 
-    this._accessToken = tokens.accessToken
-    this._userInfo = { email: tokens.email, name: tokens.name }
-    this._isAuthenticated = true
     this._emit('auth-changed')
   }
 
@@ -207,6 +233,47 @@ export class AuthManager implements IAuthManager {
     this._resolveCallback = null
     this._rejectCallback = null
     this._pendingSignIn = null
+  }
+
+  private async _refreshTokens(refreshToken: string): Promise<string | null> {
+    try {
+      const body = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: 'obsidian-multiplayer',
+      })
+
+      const response = await fetch(`${this._settings.serverUrl}/auth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      })
+
+      if (!response.ok) {
+        await this.signOut()
+        new Notice('Session expired — please sign in again')
+        return null
+      }
+
+      const data: { access_token: string; refresh_token: string; expires_in: number } =
+        await response.json()
+
+      const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString()
+      this._tokenStore.save({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt,
+        email: this._userInfo?.email ?? '',
+        name: this._userInfo?.name ?? '',
+      })
+
+      this._accessToken = data.access_token
+      return data.access_token
+    } catch {
+      await this.signOut()
+      new Notice('Session expired — please sign in again')
+      return null
+    }
   }
 
   private _generateCodeVerifier(): string {
@@ -234,10 +301,14 @@ export class AuthManager implements IAuthManager {
     token_type: string
     expires_in: number
   }> {
+    if (!this._codeVerifier) {
+      throw new Error('No code verifier — signIn() must be called first')
+    }
+
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      code_verifier: this._codeVerifier!,
+      code_verifier: this._codeVerifier,
       client_id: 'obsidian-multiplayer',
       redirect_uri: 'obsidian://multiplayer/callback',
     })
