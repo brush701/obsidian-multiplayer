@@ -184,6 +184,13 @@ export class AuthManager implements IAuthManager {
   }
 
   async signOut(): Promise<void> {
+    // Fire-and-forget server-side logout (best-effort, never blocks local sign-out)
+    if (this._accessToken) {
+      fetch(`${this._settings.serverUrl}/auth/logout`, {
+        headers: { Authorization: `Bearer ${this._accessToken}` },
+      }).catch(() => {})
+    }
+
     this._isAuthenticated = false
     this._userInfo = null
     this._accessToken = null
