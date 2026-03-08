@@ -98,6 +98,7 @@ export type InviteExpiry = '1d' | '7d' | '30d'
 export interface IAuthManager {
   signIn(): Promise<void>
   signOut(): Promise<void>
+  restoreSession(): Promise<void>
   getAccessToken(): Promise<string | null>
   handleAuthCallback(params: Record<string, string>): void
   readonly isAuthenticated: boolean

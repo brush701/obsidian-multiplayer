@@ -2,6 +2,7 @@ import type { App } from 'obsidian'
 import { Notice } from 'obsidian'
 import type { MultiplayerSettings } from './types'
 import type { IAuthManager } from './types'
+import { TokenStore } from './tokenStore'
 
 type AuthEvent = 'auth-changed'
 
@@ -35,6 +36,7 @@ export class AuthManager implements IAuthManager {
   private _app: App
   private _settings: MultiplayerSettings
   private _deps: AuthManagerDeps
+  private _tokenStore: TokenStore
   private _isAuthenticated: boolean = false
   private _userInfo: { email: string; name: string } | null = null
   private _listeners: Set<() => void> = new Set()
@@ -46,14 +48,14 @@ export class AuthManager implements IAuthManager {
   private _resolveCallback: ((params: AuthCallbackParams) => void) | null = null
   private _rejectCallback: ((reason: Error) => void) | null = null
 
-  // In-memory token storage (placeholder for TASK-10 SecretStorage)
+  // In-memory cache of tokens (persisted via TokenStore)
   private _accessToken: string | null = null
-  private _refreshToken: string | null = null
 
   constructor(app: App, settings: MultiplayerSettings, deps: AuthManagerDeps = defaultDeps) {
     this._app = app
     this._settings = settings
     this._deps = deps
+    this._tokenStore = new TokenStore(app)
   }
 
   get isAuthenticated(): boolean {
@@ -121,11 +123,21 @@ export class AuthManager implements IAuthManager {
       // Step 6: Exchange code for tokens
       const tokenResponse = await this._exchangeCodeForTokens(callbackParams.code)
       this._accessToken = tokenResponse.access_token
-      this._refreshToken = tokenResponse.refresh_token
 
       // Step 7: Fetch user info
       const userInfo = await this._fetchUserInfo(tokenResponse.access_token)
       this._userInfo = { email: userInfo.email, name: userInfo.name }
+
+      // Step 8: Persist tokens to localStorage
+      const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
+      this._tokenStore.save({
+        accessToken: tokenResponse.access_token,
+        refreshToken: tokenResponse.refresh_token,
+        expiresAt,
+        email: userInfo.email,
+        name: userInfo.name,
+      })
+
       this._isAuthenticated = true
       this._emit('auth-changed')
     } catch {
@@ -155,7 +167,23 @@ export class AuthManager implements IAuthManager {
     this._isAuthenticated = false
     this._userInfo = null
     this._accessToken = null
-    this._refreshToken = null
+    this._tokenStore.clear()
+    this._emit('auth-changed')
+  }
+
+  async restoreSession(): Promise<void> {
+    const tokens = this._tokenStore.load()
+    if (!tokens) return
+
+    const expiry = new Date(tokens.expiresAt)
+    if (expiry <= new Date()) {
+      this._tokenStore.clear()
+      return
+    }
+
+    this._accessToken = tokens.accessToken
+    this._userInfo = { email: tokens.email, name: tokens.name }
+    this._isAuthenticated = true
     this._emit('auth-changed')
   }
 
