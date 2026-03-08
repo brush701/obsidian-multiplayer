@@ -9,14 +9,8 @@ export interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[]
 }
 
-// Tokens stored locally after authentication with a multiplayer server.
-export interface StoredTokens {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number // Unix timestamp (ms)
-}
-
 // Lightweight summary of a room returned from list endpoints.
+// TODO(TASK-39): Reconcile with API.md contract
 export interface RoomSummary {
   id: string
   name: string
@@ -26,12 +20,14 @@ export interface RoomSummary {
 }
 
 // Full details of a room including its member list.
+// TODO(TASK-39): Reconcile with API.md contract
 export interface RoomDetail extends RoomSummary {
   members: RoomMember[]
   encryptionEnabled: boolean
 }
 
 // A single member of a room.
+// TODO(TASK-39): Reconcile with API.md contract
 export interface RoomMember {
   userId: string
   username: string
@@ -40,15 +36,18 @@ export interface RoomMember {
 }
 
 // Interface for the authentication boundary — mocked in tests.
-export interface AuthManager {
-  isAuthenticated(): boolean
-  getAccessToken(): Promise<string>
-  refreshTokens(): Promise<StoredTokens>
-  login(username: string, password: string): Promise<StoredTokens>
-  logout(): Promise<void>
+export interface IAuthManager {
+  signIn(): Promise<void>
+  signOut(): Promise<void>
+  getAccessToken(): Promise<string | null>
+  readonly isAuthenticated: boolean
+  readonly userInfo: { email: string; name: string } | null
+  on(event: 'auth-changed', handler: () => void): void
+  off(event: 'auth-changed', handler: () => void): void
 }
 
 // Interface for the API client boundary — mocked in tests.
+// TODO(TASK-39): Reconcile with API.md contract
 export interface ApiClient {
   listRooms(): Promise<RoomSummary[]>
   getRoom(id: string): Promise<RoomDetail>

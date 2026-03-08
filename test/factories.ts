@@ -5,7 +5,6 @@
 import type { SharedTypeSettings } from '../src/sharedTypes'
 import type {
   MultiplayerSettings,
-  StoredTokens,
   RoomSummary,
   RoomDetail,
   RoomMember,
@@ -33,19 +32,6 @@ export function makeMultiplayerSettings(
     serverUrl: '',
     username: '',
     sharedFolders: [],
-    ...overrides,
-  }
-}
-
-// ── StoredTokens ──────────────────────────────────────────────────────────────
-
-export function makeStoredTokens(
-  overrides: Partial<StoredTokens> = {}
-): StoredTokens {
-  return {
-    accessToken: 'test-access-token',
-    refreshToken: 'test-refresh-token',
-    expiresAt: Date.now() + 3_600_000, // 1 hour from now
     ...overrides,
   }
 }

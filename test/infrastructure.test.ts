@@ -12,7 +12,6 @@
 //   - Network or IndexedDB behaviour
 // Critical cases (require human review before deletion):
 //   - Property: makeSharedTypeSettings guid is always a non-empty string
-//   - Property: makeStoredTokens expiresAt is always a number
 
 import { describe, it, expect, vi } from 'vitest'
 import * as fc from 'fast-check'
@@ -20,7 +19,6 @@ import * as fc from 'fast-check'
 import {
   makeSharedTypeSettings,
   makeMultiplayerSettings,
-  makeStoredTokens,
   makeRoomMember,
   makeRoomSummary,
   makeRoomDetail,
@@ -61,22 +59,6 @@ describe('makeMultiplayerSettings', () => {
     const s = makeMultiplayerSettings({ username: 'bob', sharedFolders: [folder] })
     expect(s.username).toBe('bob')
     expect(s.sharedFolders).toHaveLength(1)
-  })
-})
-
-// ── Factory: StoredTokens ─────────────────────────────────────────────────────
-
-describe('makeStoredTokens', () => {
-  it('returns valid defaults', () => {
-    const t = makeStoredTokens()
-    expect(typeof t.accessToken).toBe('string')
-    expect(typeof t.refreshToken).toBe('string')
-    expect(t.expiresAt).toBeGreaterThan(Date.now())
-  })
-
-  it('applies overrides', () => {
-    const t = makeStoredTokens({ accessToken: 'custom-tok' })
-    expect(t.accessToken).toBe('custom-tok')
   })
 })
 
@@ -127,25 +109,27 @@ describe('makeRoomDetail', () => {
 // ── Mock: AuthManager ─────────────────────────────────────────────────────────
 
 describe('makeAuthManagerMock', () => {
-  it('provides callable stubs with default return values', async () => {
+  it('provides default unauthenticated state', async () => {
     const auth = makeAuthManagerMock()
-    expect(auth.isAuthenticated()).toBe(false)
+    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.userInfo).toBeNull()
     const token = await auth.getAccessToken()
-    expect(typeof token).toBe('string')
+    expect(token).toBeNull()
   })
 
-  it('allows per-test stub overrides', async () => {
+  it('allows per-test property overrides', () => {
     const auth = makeAuthManagerMock({
-      isAuthenticated: vi.fn().mockReturnValue(true),
+      isAuthenticated: true,
+      userInfo: { email: 'alice@test.com', name: 'Alice' },
     })
-    expect(auth.isAuthenticated()).toBe(true)
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.userInfo?.email).toBe('alice@test.com')
   })
 
   it('records calls', async () => {
     const auth = makeAuthManagerMock()
-    await auth.login('alice', 'pw')
-    expect(auth.login).toHaveBeenCalledWith('alice', 'pw')
-    expect(auth.login).toHaveBeenCalledTimes(1)
+    await auth.signOut()
+    expect(auth.signOut).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -180,21 +164,6 @@ describe('property-based: factories produce structurally valid objects', () => {
         (overrides) => {
           const s = makeSharedTypeSettings(overrides)
           return typeof s.guid === 'string' && s.guid.length > 0
-        }
-      )
-    )
-  })
-
-  it('makeStoredTokens expiresAt is always a finite number', () => {
-    fc.assert(
-      fc.property(
-        fc.record({
-          accessToken: fc.string({ minLength: 1 }),
-          refreshToken: fc.string({ minLength: 1 }),
-        }),
-        (overrides) => {
-          const t = makeStoredTokens(overrides)
-          return Number.isFinite(t.expiresAt)
         }
       )
     )

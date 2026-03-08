@@ -14,6 +14,7 @@ import {
 
 import { SharedFolder, SharedTypeSettings } from './sharedTypes'
 import { MultiplayerSettings } from './types'
+import { AuthManager } from './auth'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
@@ -29,6 +30,7 @@ const ICON_SVG_URI = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/20
 
 export default class Multiplayer extends Plugin {
   settings: MultiplayerSettings;
+  authManager: AuthManager;
   sharedFolders: SharedFolder[];
   private _extensions: Extension[];
   private _iconStyleEl: HTMLStyleElement | null = null;
@@ -36,6 +38,7 @@ export default class Multiplayer extends Plugin {
   async onload() {
     console.log("loading multiplayer");
     await this.loadSettings();
+    this.authManager = new AuthManager(this.app, this.settings)
     this.sharedFolders = [ ]
     this._extensions = []
     this.setup()
