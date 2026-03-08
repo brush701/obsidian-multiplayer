@@ -1,10 +1,10 @@
 ---
 id: TASK-9
 title: '[P2-S2] PKCE sign-in flow'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:26'
-updated_date: '2026-03-08 18:49'
+updated_date: '2026-03-08 19:31'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -13,6 +13,7 @@ references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/42'
   - >-
     https://raw.githubusercontent.com/brush701/tektite-server/refs/heads/main/API.md
+ordinal: 5000
 ---
 
 ## Description
