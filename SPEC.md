@@ -171,6 +171,12 @@ interface SharedTypeSettings {
 
 Nothing sensitive is stored in settings. Tokens live exclusively in SecretStorage (see §4.4).
 
+> **Architecture decision: single server per vault.**  `serverUrl` is a vault-level
+> setting, not per-folder. All shared folders and documents within a vault connect to
+> the same server. This simplifies authentication (one token set per vault), the
+> settings UI, and the WebSocket provider wiring (`${serverUrl}/room/${guid}`).
+> Users who need rooms on different servers should use separate Obsidian vaults.
+
 ### 4.3 Auth Flow — OAuth 2.0 PKCE
 
 The plugin uses the Authorization Code flow with PKCE. No client secret is required — this is the correct flow for a native/desktop app.
