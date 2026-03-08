@@ -20,8 +20,10 @@ import {
   makeSharedTypeSettings,
   makeMultiplayerSettings,
   makeRoomMember,
-  makeRoomSummary,
+  makeRoomListItem,
   makeRoomDetail,
+  makeCreateRoomResult,
+  makeJoinResult,
 } from './factories'
 import { makeAuthManagerMock, makeApiClientMock } from './mocks'
 
@@ -39,7 +41,6 @@ describe('makeSharedTypeSettings', () => {
   it('applies overrides', () => {
     const s = makeSharedTypeSettings({ path: 'my-notes' })
     expect(s.path).toBe('my-notes')
-    // non-overridden fields keep defaults
     expect(s.guid).toBe('aaaaaaaa-0000-0000-0000-000000000001')
   })
 })
@@ -68,24 +69,33 @@ describe('makeRoomMember', () => {
   it('returns valid defaults', () => {
     const m = makeRoomMember()
     expect(typeof m.userId).toBe('string')
-    expect(['owner', 'editor', 'viewer']).toContain(m.role)
+    expect(typeof m.email).toBe('string')
+    expect(typeof m.name).toBe('string')
+    expect(['OWNER', 'EDITOR', 'VIEWER']).toContain(m.role)
   })
 
   it('applies overrides', () => {
-    const m = makeRoomMember({ role: 'owner', username: 'carol' })
-    expect(m.role).toBe('owner')
-    expect(m.username).toBe('carol')
+    const m = makeRoomMember({ role: 'OWNER', name: 'Carol' })
+    expect(m.role).toBe('OWNER')
+    expect(m.name).toBe('Carol')
   })
 })
 
-// ── Factory: RoomSummary ──────────────────────────────────────────────────────
+// ── Factory: RoomListItem ─────────────────────────────────────────────────────
 
-describe('makeRoomSummary', () => {
+describe('makeRoomListItem', () => {
   it('returns valid defaults', () => {
-    const r = makeRoomSummary()
-    expect(typeof r.id).toBe('string')
+    const r = makeRoomListItem()
+    expect(typeof r.guid).toBe('string')
     expect(typeof r.name).toBe('string')
-    expect(r.memberCount).toBeGreaterThanOrEqual(0)
+    expect(typeof r.orgId).toBe('string')
+    expect(['OWNER', 'EDITOR', 'VIEWER']).toContain(r.role)
+  })
+
+  it('applies overrides', () => {
+    const r = makeRoomListItem({ name: 'Custom Room', role: 'VIEWER' })
+    expect(r.name).toBe('Custom Room')
+    expect(r.role).toBe('VIEWER')
   })
 })
 
@@ -96,13 +106,35 @@ describe('makeRoomDetail', () => {
     const r = makeRoomDetail()
     expect(Array.isArray(r.members)).toBe(true)
     expect(r.members.length).toBeGreaterThan(0)
-    expect(typeof r.encryptionEnabled).toBe('boolean')
+    expect(typeof r.openToOrg).toBe('boolean')
+    expect(typeof r.orgId).toBe('string')
   })
 
-  it('applies deep overrides', () => {
-    const r = makeRoomDetail({ name: 'deep-override', memberCount: 3 })
+  it('applies overrides', () => {
+    const r = makeRoomDetail({ name: 'deep-override', openToOrg: true })
     expect(r.name).toBe('deep-override')
-    expect(r.memberCount).toBe(3)
+    expect(r.openToOrg).toBe(true)
+  })
+})
+
+// ── Factory: CreateRoomResult ─────────────────────────────────────────────────
+
+describe('makeCreateRoomResult', () => {
+  it('returns valid defaults', () => {
+    const r = makeCreateRoomResult()
+    expect(typeof r.guid).toBe('string')
+    expect(typeof r.name).toBe('string')
+    expect(typeof r.orgId).toBe('string')
+  })
+})
+
+// ── Factory: JoinResult ───────────────────────────────────────────────────────
+
+describe('makeJoinResult', () => {
+  it('returns valid defaults', () => {
+    const r = makeJoinResult()
+    expect(typeof r.guid).toBe('string')
+    expect(typeof r.name).toBe('string')
   })
 })
 
@@ -140,7 +172,7 @@ describe('makeApiClientMock', () => {
     const api = makeApiClientMock()
     const rooms = await api.listRooms()
     expect(Array.isArray(rooms)).toBe(true)
-    expect(rooms[0].id).toBe('room-001')
+    expect(rooms[0].guid).toBe('room-001')
   })
 
   it('allows override of a single method', async () => {
@@ -149,6 +181,18 @@ describe('makeApiClientMock', () => {
     })
     const rooms = await api.listRooms()
     expect(rooms).toHaveLength(0)
+  })
+
+  it('covers all ApiClient methods', () => {
+    const api = makeApiClientMock()
+    const methods = [
+      'getVersion', 'listRooms', 'createRoom', 'getRoom', 'deleteRoom',
+      'getMyRole', 'joinRoom', 'createInvite', 'revokeInvite',
+      'updateMemberRole', 'removeMember',
+    ]
+    for (const method of methods) {
+      expect(typeof api[method as keyof typeof api]).toBe('function')
+    }
   })
 })
 
@@ -170,10 +214,10 @@ describe('property-based: factories produce structurally valid objects', () => {
   })
 
   it('makeRoomMember role is always one of the valid role values', () => {
-    const validRoles = ['owner', 'editor', 'viewer'] as const
+    const validRoles = ['OWNER', 'EDITOR', 'VIEWER'] as const
     fc.assert(
       fc.property(
-        fc.record({ username: fc.string({ minLength: 1 }) }),
+        fc.record({ name: fc.string({ minLength: 1 }) }),
         (overrides) => {
           const m = makeRoomMember(overrides)
           return validRoles.includes(m.role)

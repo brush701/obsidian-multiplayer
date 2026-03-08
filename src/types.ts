@@ -1,5 +1,6 @@
 // Core domain types for the obsidian-multiplayer plugin.
 // These are used throughout the codebase and in test factories.
+// Types in this file match the server API contract in API.md.
 
 import { SharedTypeSettings } from './sharedTypes'
 
@@ -9,33 +10,91 @@ export interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[]
 }
 
-// Lightweight summary of a room returned from list endpoints.
-// TODO(TASK-39): Reconcile with API.md contract
-export interface RoomSummary {
-  id: string
+// ── Roles ────────────────────────────────────────────────────────────────────
+
+export type RoomRole = 'OWNER' | 'EDITOR' | 'VIEWER'
+
+// ── Room types ───────────────────────────────────────────────────────────────
+
+/** Returned by `GET /api/rooms` (list). */
+export interface RoomListItem {
+  guid: string
   name: string
-  ownerUsername: string
-  memberCount: number
-  createdAt: number // Unix timestamp (ms)
+  role: RoomRole
+  orgId: string
 }
 
-// Full details of a room including its member list.
-// TODO(TASK-39): Reconcile with API.md contract
-export interface RoomDetail extends RoomSummary {
+/** Returned by `GET /api/rooms/:guid` (detail). */
+export interface RoomDetail {
+  guid: string
+  name: string
+  orgId: string
+  openToOrg: boolean
   members: RoomMember[]
-  encryptionEnabled: boolean
 }
 
-// A single member of a room.
-// TODO(TASK-39): Reconcile with API.md contract
+/** A member within a RoomDetail. */
 export interface RoomMember {
   userId: string
-  username: string
-  role: 'owner' | 'editor' | 'viewer'
-  joinedAt: number // Unix timestamp (ms)
+  email: string
+  name: string
+  role: RoomRole
 }
 
-// Interface for the authentication boundary — mocked in tests.
+// ── Request/response types ───────────────────────────────────────────────────
+
+/** Returned by `POST /api/rooms` (create). */
+export interface CreateRoomResult {
+  guid: string
+  name: string
+  orgId: string
+}
+
+/** Returned by `POST /api/rooms/join`. */
+export interface JoinResult {
+  guid: string
+  name: string
+}
+
+/** Returned by `POST /api/rooms/:guid/invites`. */
+export interface InviteResponse {
+  inviteUrl: string
+}
+
+/** Returned by `PUT /api/rooms/:guid/members/:userId`. */
+export interface MemberRoleResult {
+  userId: string
+  role: RoomRole
+}
+
+/** Returned by `GET /api/rooms/:guid/me`. */
+export interface MyRoleResult {
+  role: RoomRole
+}
+
+/** Returned by `GET /api/version`. */
+export interface VersionInfo {
+  server: string
+  apiVersion: string
+  minPluginVersion: string
+}
+
+// ── Error types ──────────────────────────────────────────────────────────────
+
+export interface ApiError {
+  error: string
+  message: string
+  statusCode: number
+  details?: { field: string; message: string }[]
+}
+
+// ── Invite expiry ────────────────────────────────────────────────────────────
+
+export type InviteExpiry = '1d' | '7d' | '30d'
+
+// ── Auth boundary ────────────────────────────────────────────────────────────
+
+/** Interface for the authentication boundary — mocked in tests. */
 export interface IAuthManager {
   signIn(): Promise<void>
   signOut(): Promise<void>
@@ -46,13 +105,19 @@ export interface IAuthManager {
   off(event: 'auth-changed', handler: () => void): void
 }
 
-// Interface for the API client boundary — mocked in tests.
-// TODO(TASK-39): Reconcile with API.md contract
+// ── API client boundary ──────────────────────────────────────────────────────
+
+/** Interface for the API client boundary — mocked in tests. */
 export interface ApiClient {
-  listRooms(): Promise<RoomSummary[]>
-  getRoom(id: string): Promise<RoomDetail>
-  createRoom(name: string): Promise<RoomSummary>
-  deleteRoom(id: string): Promise<void>
-  addMember(roomId: string, userId: string, role: RoomMember['role']): Promise<RoomMember>
-  removeMember(roomId: string, userId: string): Promise<void>
+  getVersion(): Promise<VersionInfo>
+  listRooms(): Promise<RoomListItem[]>
+  createRoom(name: string): Promise<CreateRoomResult>
+  getRoom(guid: string): Promise<RoomDetail>
+  deleteRoom(guid: string): Promise<void>
+  getMyRole(guid: string): Promise<MyRoleResult>
+  joinRoom(token: string): Promise<JoinResult>
+  createInvite(guid: string, role: 'EDITOR' | 'VIEWER', expiresIn: InviteExpiry): Promise<InviteResponse>
+  revokeInvite(guid: string, token: string): Promise<void>
+  updateMemberRole(guid: string, userId: string, role: 'EDITOR' | 'VIEWER'): Promise<MemberRoleResult>
+  removeMember(guid: string, userId: string): Promise<void>
 }
