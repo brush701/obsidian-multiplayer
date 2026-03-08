@@ -17,3 +17,7 @@ main.js
 
 # obsidian
 data.json
+
+coverage/
+.DS_Store
+dist/
