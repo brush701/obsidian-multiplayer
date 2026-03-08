@@ -1,10 +1,10 @@
 ---
 id: TASK-11
 title: '[P2-S4] Silent token refresh'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-08 20:48'
+updated_date: '2026-03-08 21:09'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -15,6 +15,7 @@ references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/44'
   - >-
     https://raw.githubusercontent.com/brush701/tektite-server/refs/heads/main/API.md
+ordinal: 10000
 ---
 
 ## Description

@@ -6,7 +6,7 @@
 - **Technical spec:** `SPEC.md` (architecture, design decisions)
 
 # General workflow
-Feature development and bug fixes should be tracked with Backlog.md tasks. This ensures that work is visible, organized, and can be properly reviewed and tested. Features should be built in a feature branch and merged into main via pull request, with a link to the corresponding Backlog task (and if applicable, github issue). This allows for code review and testing before changes are merged.
+Feature development and bug fixes should be tracked with Backlog.md tasks. This ensures that work is visible, organized, and can be properly reviewed and tested. Features should be built in a feature branch and merged into main via pull request, with a link to the corresponding Backlog task (and if applicable, github issue). This allows for code review and testing before changes are merged. IMPORTANT: pre-existing issues/bugs are still bugs and should be resolved immediately. All checkins should be bug free and not cause regressions. If you encounter a bug, fix it immediately and create a task to track the work if necessary.
 
 # Agent Teams
 When working on a task, you may need to collaborate with other agents. If and when you feel appropriate, use agent teams to create a team and manage other agents to collaborate on the task. This allows for better coordination and communication between agents working on the same task.

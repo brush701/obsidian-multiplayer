@@ -1,10 +1,10 @@
 ---
 id: TASK-13
 title: '[P2-S6] Token injection into WebSocket connections'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-08 22:20'
+updated_date: '2026-03-08 22:30'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -13,6 +13,7 @@ references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/46'
   - >-
     https://raw.githubusercontent.com/brush701/tektite-server/refs/heads/main/API.md
+  - 'https://github.com/brush701/obsidian-multiplayer/pull/90'
 ---
 
 ## Description
