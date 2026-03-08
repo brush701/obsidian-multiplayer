@@ -222,37 +222,97 @@ export default class Multiplayer extends Plugin {
 class MultiplayerSettingTab extends PluginSettingTab {
 
   plugin: Multiplayer;
+  private _authSectionEl: HTMLElement | null = null;
+  private _authChangedHandler: (() => void) | null = null;
+  private _signingIn = false;
+
   constructor(app: App, plugin: Multiplayer) {
     super(app, plugin);
     this.plugin = plugin;
   }
+
   display(): void {
+    this._unregisterAuthListener();
+
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Multiplayer" });
+
+    new Setting(containerEl)
+      .setName("Server URL")
+      .setDesc("e.g. https://multiplayer.company.com")
+      .addText((text) => {
+        text.setValue(this.plugin.settings.serverUrl)
+        text.onChange(value => {
+          this.plugin.settings.serverUrl = value;
+          this.plugin.saveSettings();
+          this._renderAuthSection();
+        })
+      })
+
     new Setting(containerEl)
       .setName("Username")
       .setDesc("The name that others will see over your caret")
       .addText((text) => {
         text.setValue(this.plugin.settings.username)
-        text.onChange( value => {
-          this.plugin.settings.username = value
-          this.plugin.saveSettings()
+        text.onChange(value => {
+          this.plugin.settings.username = value;
+          this.plugin.saveSettings();
         })
-      }
-      )
+      })
 
-    if (this.plugin.authManager.isAuthenticated) {
-      const userInfo = this.plugin.authManager.userInfo
-      new Setting(containerEl)
-        .setName('Signed in')
-        .setDesc(`Signed in as ${userInfo?.email ?? 'unknown'}`)
+    this._authSectionEl = containerEl.createDiv();
+    this._renderAuthSection();
+
+    this._authChangedHandler = () => this._renderAuthSection();
+    this.plugin.authManager.on('auth-changed', this._authChangedHandler);
+  }
+
+  hide(): void {
+    this._unregisterAuthListener();
+  }
+
+  private _unregisterAuthListener(): void {
+    if (this._authChangedHandler) {
+      this.plugin.authManager.off('auth-changed', this._authChangedHandler);
+      this._authChangedHandler = null;
+    }
+  }
+
+  private _renderAuthSection(): void {
+    if (!this._authSectionEl) return;
+    this._authSectionEl.empty();
+
+    const { authManager } = this.plugin;
+
+    if (authManager.isAuthenticated) {
+      const email = authManager.userInfo?.email ?? 'unknown';
+      new Setting(this._authSectionEl)
+        .setName(`● Signed in as ${email}`)
         .addButton(btn => {
           btn.setButtonText('Sign Out')
             .setWarning()
             .onClick(async () => {
-              await this.plugin.authManager.signOut()
-              this.display()
+              await authManager.signOut();
+            })
+        })
+    } else {
+      const buttonText = this._signingIn ? 'Signing in…' : 'Sign In';
+      const disabled = !this.plugin.settings.serverUrl || this._signingIn;
+      new Setting(this._authSectionEl)
+        .setName('○ Not signed in')
+        .addButton(btn => {
+          btn.setButtonText(buttonText)
+            .setDisabled(disabled)
+            .onClick(async () => {
+              this._signingIn = true;
+              this._renderAuthSection();
+              try {
+                await authManager.signIn();
+              } finally {
+                this._signingIn = false;
+                this._renderAuthSection();
+              }
             })
         })
     }
