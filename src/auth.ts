@@ -37,7 +37,7 @@ export class AuthManager implements IAuthManager {
   private _settings: MultiplayerSettings
   private _deps: AuthManagerDeps
   private _tokenStore: TokenStore
-  private _isAuthenticated: boolean = false
+  private _isAuthenticated = false
   private _userInfo: { email: string; name: string } | null = null
   private _listeners: Set<() => void> = new Set()
 
@@ -301,10 +301,14 @@ export class AuthManager implements IAuthManager {
     token_type: string
     expires_in: number
   }> {
+    if (!this._codeVerifier) {
+      throw new Error('No code verifier — signIn() must be called first')
+    }
+
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      code_verifier: this._codeVerifier!,
+      code_verifier: this._codeVerifier,
       client_id: 'obsidian-multiplayer',
       redirect_uri: 'obsidian://multiplayer/callback',
     })
