@@ -3,7 +3,6 @@ import  Multiplayer from "./main"
 import { randomUUID } from "crypto";
 import { SharedFolder } from "./sharedTypes";
 
-const DEFAULT_SIGNALING_SERVERS = 'wss://signaling.tektite.team'
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
   folder: TFolder;
@@ -56,11 +55,8 @@ export class SharedFolderModal extends Modal {
             // @ts-expect-error, not typed
             const guid = form.querySelector('input[name="guid"]').value || randomUUID()
 
-            const servers = DEFAULT_SIGNALING_SERVERS
-            const signalingServers = servers.split(',');
-
             const path = this.folder.path
-            const settings = { guid: guid , path: path, signalingServers: signalingServers }
+            const settings = { guid: guid , path: path }
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))
