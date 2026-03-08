@@ -55,14 +55,6 @@ export default class Multiplayer extends Plugin {
                   .onClick(() => new UnshareFolderModal(this.app, this, folder).open());
               })
 
-              menu.addItem((item) => {
-                item
-                  .setTitle('Copy GUID')
-                  .onClick(() => navigator.clipboard.writeText(folder.settings.guid).then(() => {
-                    new Notice("Copied GUID")
-                  }))
-              })
-
               return true
             }
           })
