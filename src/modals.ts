@@ -56,7 +56,7 @@ export class SharedFolderModal extends Modal {
             const guid = form.querySelector('input[name="guid"]').value || randomUUID()
 
             const path = this.folder.path
-            const settings = { guid: guid , path: path }
+            const settings = { guid: guid, path: path, name: '' }
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))

@@ -35,7 +35,7 @@ describe('makeSharedTypeSettings', () => {
     expect(typeof s.guid).toBe('string')
     expect(s.guid.length).toBeGreaterThan(0)
     expect(typeof s.path).toBe('string')
-    expect(Array.isArray(s.signalingServers)).toBe(true)
+    expect(typeof s.name).toBe('string')
   })
 
   it('applies overrides', () => {
@@ -51,7 +51,7 @@ describe('makeSharedTypeSettings', () => {
 describe('makeMultiplayerSettings', () => {
   it('returns valid defaults', () => {
     const s = makeMultiplayerSettings()
-    expect(s.username).toBe('Anonymous')
+    expect(s.username).toBe('')
     expect(Array.isArray(s.sharedFolders)).toBe(true)
     expect(s.sharedFolders).toHaveLength(0)
   })

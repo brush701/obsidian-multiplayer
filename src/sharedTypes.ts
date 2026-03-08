@@ -12,6 +12,7 @@ import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
   path: string
+  name: string
 }
 
 const usercolors = [
