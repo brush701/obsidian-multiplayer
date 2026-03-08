@@ -260,10 +260,7 @@ export class SharedDoc {
 
   private async _connectWithAuth(): Promise<void> {
     const token = await this._parent.plugin.authManager.getAccessToken()
-    if (!token) {
-      new Notice('Not signed in — cannot connect to room.')
-      return
-    }
+    if (!token) return
     this._provider.params = { token }
     this._provider.connect()
   }
