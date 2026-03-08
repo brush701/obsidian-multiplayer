@@ -4,13 +4,14 @@ title: '[P1-S5] Remove context menu legacy items'
 status: Done
 assignee: []
 created_date: '2026-03-08 16:26'
-updated_date: '2026-03-08 17:48'
+updated_date: '2026-03-08 18:33'
 labels:
   - enhancement
   - 'epic: P1 - Transport Migration'
 dependencies: []
 references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/40'
+ordinal: 3000
 ---
 
 ## Description

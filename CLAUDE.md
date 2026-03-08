@@ -1,3 +1,16 @@
+# Key references
+
+- **Plugin–Server API contract (source of truth):** https://raw.githubusercontent.com/brush701/tektite-server/refs/heads/main/API.md
+  - Also available locally if tektite-server is checked out: `~/dev/tektite-server/API.md`
+  - All types in `src/types.ts` must match this contract exactly
+- **Technical spec:** `SPEC.md` (architecture, design decisions)
+
+# General workflow
+Feature development and bug fixes should be tracked with Backlog.md tasks. This ensures that work is visible, organized, and can be properly reviewed and tested. Features should be built in a feature branch and merged into main via pull request, with a link to the corresponding Backlog task (and if applicable, github issue). This allows for code review and testing before changes are merged.
+
+# Agent Teams
+When working on a task, you may need to collaborate with other agents. If and when you feel appropriate, use agent teams to create a team and manage other agents to collaborate on the task. This allows for better coordination and communication between agents working on the same task.
+
 <CRITICAL_INSTRUCTION>
 
 ## BACKLOG WORKFLOW INSTRUCTIONS

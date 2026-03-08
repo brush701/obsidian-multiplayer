@@ -4,6 +4,7 @@ statuses: ["To Do", "In Progress", "Done"]
 labels: []
 date_format: yyyy-mm-dd
 max_column_width: 20
+default_editor: "nvim"
 auto_open_browser: true
 default_port: 6420
 remote_operations: true
