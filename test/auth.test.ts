@@ -19,14 +19,12 @@ import { AuthManager } from '../src/auth'
 import { App } from 'obsidian'
 import { makeMultiplayerSettings } from './factories'
 
-// Stub globalThis.open for Node test environment
-const openStub = vi.fn<[string], null>().mockReturnValue(null)
-;(globalThis as Record<string, unknown>).open = openStub
+const openExternalStub = vi.fn<[string], void>()
 
 function createAuthManager(serverUrl = 'https://example.com') {
   const app = new App()
   const settings = makeMultiplayerSettings({ serverUrl })
-  return new AuthManager(app, settings)
+  return new AuthManager(app, settings, { openUrl: openExternalStub })
 }
 
 // Helper: mock fetch to return token + userinfo responses
@@ -76,14 +74,14 @@ function mockFetchTokenFailure(status = 400) {
 // Helper: start signIn and wait for browser to open, return the authorize URL
 async function signInAndGetUrl(auth: AuthManager): Promise<URL> {
   await vi.waitFor(() => {
-    expect(openStub).toHaveBeenCalled()
+    expect(openExternalStub).toHaveBeenCalled()
   })
-  return new URL(openStub.mock.calls[openStub.mock.calls.length - 1][0])
+  return new URL(openExternalStub.mock.calls[openExternalStub.mock.calls.length - 1][0])
 }
 
 describe('AuthManager', () => {
   beforeEach(() => {
-    openStub.mockClear()
+    openExternalStub.mockClear()
   })
 
   afterEach(() => {
@@ -351,10 +349,10 @@ describe('AuthManager', () => {
 
       // Only one browser window opened
       await vi.waitFor(() => {
-        expect(openStub).toHaveBeenCalledTimes(1)
+        expect(openExternalStub).toHaveBeenCalledTimes(1)
       })
 
-      const url = new URL(openStub.mock.calls[0][0])
+      const url = new URL(openExternalStub.mock.calls[0][0])
       auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
       await promise1
     })
@@ -403,7 +401,7 @@ describe('AuthManager', () => {
 
       // Sign out, then sign in again
       await auth.signOut()
-      openStub.mockClear()
+      openExternalStub.mockClear()
 
       const signIn2 = auth.signIn()
       const url2 = await signInAndGetUrl(auth)

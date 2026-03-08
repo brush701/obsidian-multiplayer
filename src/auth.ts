@@ -10,6 +10,19 @@ interface AuthCallbackParams {
   state: string
 }
 
+export interface AuthManagerDeps {
+  openUrl: (url: string) => void
+}
+
+const defaultDeps: AuthManagerDeps = {
+  openUrl: (url: string) => {
+    // electron is available at runtime in Obsidian's Electron environment
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { shell } = require('electron')
+    shell.openExternal(url)
+  },
+}
+
 function base64urlEncode(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i++) {
@@ -21,6 +34,7 @@ function base64urlEncode(bytes: Uint8Array): string {
 export class AuthManager implements IAuthManager {
   private _app: App
   private _settings: MultiplayerSettings
+  private _deps: AuthManagerDeps
   private _isAuthenticated: boolean = false
   private _userInfo: { email: string; name: string } | null = null
   private _listeners: Set<() => void> = new Set()
@@ -36,9 +50,10 @@ export class AuthManager implements IAuthManager {
   private _accessToken: string | null = null
   private _refreshToken: string | null = null
 
-  constructor(app: App, settings: MultiplayerSettings) {
+  constructor(app: App, settings: MultiplayerSettings, deps: AuthManagerDeps = defaultDeps) {
     this._app = app
     this._settings = settings
+    this._deps = deps
   }
 
   get isAuthenticated(): boolean {
@@ -91,7 +106,7 @@ export class AuthManager implements IAuthManager {
     })
 
     const authorizeUrl = `${this._settings.serverUrl}/auth/authorize?${params.toString()}`
-    globalThis.open(authorizeUrl)
+    this._deps.openUrl(authorizeUrl)
 
     // Step 4: Wait for callback, validate, and exchange
     try {
