@@ -51,7 +51,7 @@ describe('makeSharedTypeSettings', () => {
 describe('makeMultiplayerSettings', () => {
   it('returns valid defaults', () => {
     const s = makeMultiplayerSettings()
-    expect(s.username).toBe('Anonymous')
+    expect(s.username).toBe('')
     expect(Array.isArray(s.sharedFolders)).toBe(true)
     expect(s.sharedFolders).toHaveLength(0)
   })
