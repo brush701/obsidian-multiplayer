@@ -10,6 +10,8 @@ export class SharedFolderModal extends Modal {
   private joinContentEl: HTMLElement;
   private roomNameInput: HTMLInputElement;
   private createBtn: HTMLButtonElement;
+  private inviteInput: HTMLInputElement;
+  private joinBtn: HTMLButtonElement;
 
   constructor(app: App, plugin: Multiplayer, folder: TFolder) {
     super(app);
@@ -63,6 +65,7 @@ export class SharedFolderModal extends Modal {
       createTab.removeClass('multiplayer-tab-active');
       this.joinContentEl.style.display = '';
       this.createContentEl.style.display = 'none';
+      this.inviteInput.focus();
     }
   }
 
@@ -141,11 +144,90 @@ export class SharedFolderModal extends Modal {
     }
   }
 
+  private extractToken(input: string): string {
+    const trimmed = input.trim();
+    if (trimmed.includes('://')) {
+      try {
+        const url = new URL(trimmed);
+        return url.searchParams.get('token') ?? '';
+      } catch {
+        return '';
+      }
+    }
+    return trimmed;
+  }
+
   private renderJoinTab() {
-    this.joinContentEl.createEl('p', {
-      text: 'Join tab coming soon.',
-      cls: 'multiplayer-placeholder',
+    const el = this.joinContentEl;
+
+    const label = el.createEl('label', { text: 'Invite link or code' });
+    label.style.display = 'block';
+    label.style.marginBottom = '4px';
+    label.style.marginTop = '12px';
+
+    this.inviteInput = el.createEl('input', {
+      type: 'text',
+      placeholder: 'Paste an invite link or code',
+      cls: 'multiplayer-invite-input',
     });
+    this.inviteInput.style.width = '100%';
+
+    const btnContainer = el.createDiv();
+    btnContainer.style.marginTop = '12px';
+
+    this.joinBtn = btnContainer.createEl('button', {
+      text: 'Join Room',
+      cls: 'mod-cta',
+    });
+
+    this.updateJoinBtnState();
+
+    this.inviteInput.addEventListener('input', () => this.updateJoinBtnState());
+
+    this.joinBtn.onClickEvent(() => this.handleJoin());
+  }
+
+  private updateJoinBtnState() {
+    const token = this.extractToken(this.inviteInput.value);
+    this.joinBtn.disabled = !token;
+  }
+
+  private _joining = false;
+
+  private async handleJoin() {
+    const token = this.extractToken(this.inviteInput.value);
+    if (!token || this._joining) return;
+
+    this._joining = true;
+    this.joinBtn.disabled = true;
+    this.joinBtn.textContent = 'Joining…';
+
+    try {
+      const result = await this.plugin.apiClient.joinRoom(token);
+      const path = this.folder.path;
+      const settings = { guid: result.guid, name: result.name, path };
+      this.plugin.settings.sharedFolders.push(settings);
+      await this.plugin.saveSettings();
+      const newFolder = new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin);
+      this.plugin.addSharedFolder(newFolder);
+      this.close();
+    } catch (e) {
+      if (e instanceof AuthRequiredError) {
+        new Notice('Sign in first.');
+      } else if (e instanceof ApiRequestError) {
+        if (e.statusCode === 404 || e.statusCode === 410) {
+          new Notice('Invite link is invalid or has expired.');
+        } else {
+          new Notice(`Could not join room: ${e.message}`);
+        }
+      } else {
+        new Notice('Could not join room: unexpected error.');
+      }
+      this._joining = false;
+      this.joinBtn.disabled = false;
+      this.joinBtn.textContent = 'Join Room';
+      this.updateJoinBtnState();
+    }
   }
 
   onClose() {
