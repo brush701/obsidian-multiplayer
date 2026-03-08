@@ -41,24 +41,9 @@ export class SharedFolderModal extends Modal {
               name: "guid",
               id: "sharedFolder-guid"
             },
-            placeholder: "SharedFolder password",
+            placeholder: "SharedFolder GUID",
           });
 
-          form.createEl("br")
-
-          form.createEl("label", {
-            attr: { for: "sharedFolder-password" },
-            text: "Optional password: "
-          })
-
-          form.createEl("input", {
-            type: "password",
-            attr: {
-              name: "password",
-              id: "sharedFolder-password"
-            },
-            placeholder: "SharedFolder password",
-          });
           form.createEl("br")
           form.createEl("br")
 
@@ -73,11 +58,9 @@ export class SharedFolderModal extends Modal {
 
             const servers = DEFAULT_SIGNALING_SERVERS
             const signalingServers = servers.split(',');
-            
-            // @ts-expect-error, not typed
-            const password = form.querySelector('input[name="password"]').value;
+
             const path = this.folder.path
-            const settings = { guid: guid , path: path, signalingServers: signalingServers, encPw: this.plugin.pwMgr.encryptPassword(password)}
+            const settings = { guid: guid , path: path, signalingServers: signalingServers }
             this.plugin.settings.sharedFolders.push(settings)
             this.plugin.saveSettings();
             this.plugin.sharedFolders.push(new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this.plugin))
@@ -134,113 +117,3 @@ export class UnshareFolderModal extends Modal {
   }
 }
 
-export class PasswordModal extends Modal {
-  plugin: Multiplayer;
-  onSubmit: (result: string) => void
-
-
-  constructor(app: App, plugin: Multiplayer, onSubmit: (result: string) => void) {
-    super(app);
-    this.plugin = plugin;
-    this.onSubmit = onSubmit
-  }
-
-  onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('modal-style-multiplayer');
-    contentEl.empty();
-    contentEl.createEl("h2", { text: "Multiplayer Password" });
-    contentEl.createEl('p', { text: 'Please provide your master password. If this is your first time loading the plugin, you can set your new password here.'})
-    contentEl.createEl("form", "form-multiplayer",
-      (form) => {
-        form.createEl("label", {
-          attr: { for: "password" },
-          text: "Password: "
-        })
-
-        form.createEl("input", {
-          type: "password",
-          attr: {
-            name: "password",
-            id: "password"
-          }
-        });
-
-        form.createEl("br")
-        form.createEl("br")
-
-        form.createEl("button", {
-          text: "Create",
-          type: "submit",
-        });
-
-        form.onsubmit = async (e) => {
-          e.preventDefault();
-          // @ts-expect-error, not typed
-          const password = form.querySelector('input[name="password"]').value
-          this.close()
-          this.onSubmit(password)
-        }
-      })
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-  }
-}
-
-export class ResetPasswordModal extends Modal {
-  plugin: Multiplayer;
-  onSubmit: (result: string) => void
-
-
-  constructor(app: App, plugin: Multiplayer, onSubmit: (result: string) => void) {
-    super(app);
-    this.plugin = plugin;
-    this.onSubmit = onSubmit
-  }
-
-  onOpen() {
-    const { contentEl, modalEl } = this;
-    modalEl.addClass('modal-style-multiplayer');
-    contentEl.empty();
-    contentEl.createEl("h2", { text: "Reset Master Password" });
-    contentEl.createEl("form", "form-multiplayer",
-      (form) => {
-        form.createEl("label", {
-          attr: { for: "password" },
-          text: "New Password: "
-        })
-
-        form.createEl("input", {
-          type: "password",
-          attr: {
-            name: "password",
-            id: "password"
-          }
-        });
-
-        form.createEl("br")
-        form.createEl("br")
-
-        form.createEl("button", {
-          text: "Create",
-          type: "submit",
-        });
-
-        form.onsubmit = async (e) => {
-          e.preventDefault();
-          // @ts-expect-error, not typed
-          const password = form.querySelector('input[name="password"]').value
-          this.close()
-          this.onSubmit(password)
-        }
-      })
-  }
-
-  onClose() {
-    const { contentEl } = this;
-    contentEl.empty();
-  }
-}

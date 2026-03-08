@@ -6,7 +6,6 @@ import { SharedTypeSettings } from './sharedTypes'
 export interface MultiplayerSettings {
   sharedFolders: SharedTypeSettings[]
   username: string
-  salt: string
 }
 
 // Tokens stored locally after authentication with a multiplayer server.

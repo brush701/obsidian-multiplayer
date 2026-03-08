@@ -39,9 +39,8 @@ describe('makeSharedTypeSettings', () => {
   })
 
   it('applies overrides', () => {
-    const s = makeSharedTypeSettings({ path: 'my-notes', encPw: 'secret' })
+    const s = makeSharedTypeSettings({ path: 'my-notes' })
     expect(s.path).toBe('my-notes')
-    expect(s.encPw).toBe('secret')
     // non-overridden fields keep defaults
     expect(s.guid).toBe('aaaaaaaa-0000-0000-0000-000000000001')
   })
@@ -177,7 +176,6 @@ describe('property-based: factories produce structurally valid objects', () => {
       fc.property(
         fc.record({
           path: fc.string({ minLength: 1 }),
-          encPw: fc.string(),
         }),
         (overrides) => {
           const s = makeSharedTypeSettings(overrides)
