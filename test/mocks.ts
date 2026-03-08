@@ -6,35 +6,40 @@
 //
 // Usage:
 //   const auth = makeAuthManagerMock()
-//   auth.isAuthenticated.mockReturnValue(true)
-//   auth.getAccessToken.mockResolvedValue('tok')
+//   auth.isAuthenticated  // false by default
+//   auth.getAccessToken() // resolves to null
 
 import { vi } from 'vitest'
 import type {
-  AuthManager,
+  IAuthManager,
   ApiClient,
-  StoredTokens,
   RoomSummary,
   RoomDetail,
   RoomMember,
 } from '../src/types'
-import { makeStoredTokens, makeRoomSummary, makeRoomDetail, makeRoomMember } from './factories'
+import { makeRoomSummary, makeRoomDetail, makeRoomMember } from './factories'
 
 // ── AuthManager mock ──────────────────────────────────────────────────────────
 
-export type AuthManagerMock = {
-  [K in keyof AuthManager]: ReturnType<typeof vi.fn>
+export interface AuthManagerMock extends IAuthManager {
+  signIn: ReturnType<typeof vi.fn>
+  signOut: ReturnType<typeof vi.fn>
+  getAccessToken: ReturnType<typeof vi.fn>
+  on: ReturnType<typeof vi.fn>
+  off: ReturnType<typeof vi.fn>
 }
 
 export function makeAuthManagerMock(
   overrides: Partial<AuthManagerMock> = {}
 ): AuthManagerMock {
   return {
-    isAuthenticated: vi.fn().mockReturnValue(false),
-    getAccessToken: vi.fn<[], Promise<string>>().mockResolvedValue('test-access-token'),
-    refreshTokens: vi.fn<[], Promise<StoredTokens>>().mockResolvedValue(makeStoredTokens()),
-    login: vi.fn<[string, string], Promise<StoredTokens>>().mockResolvedValue(makeStoredTokens()),
-    logout: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
+    isAuthenticated: false,
+    userInfo: null,
+    signIn: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
+    signOut: vi.fn<[], Promise<void>>().mockResolvedValue(undefined),
+    getAccessToken: vi.fn<[], Promise<string | null>>().mockResolvedValue(null),
+    on: vi.fn(),
+    off: vi.fn(),
     ...overrides,
   }
 }
