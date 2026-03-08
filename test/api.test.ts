@@ -2,16 +2,17 @@
 // Scope: Unit
 // Spec: TASK-16 — [P3-S1] API client
 // What this suite validates:
-//   - Auth guard: null token → AuthRequiredError, no fetch call
+//   - Auth guard: null token → AuthRequiredError, no requestUrl call
+//   - getVersion() works without authentication
 //   - Success paths: correct URL, method, headers, parsed response
-//   - Error paths: non-2xx → ApiRequestError with status and message
+//   - Error paths: non-2xx → ApiRequestError with ApiError fields
 //   - 204 responses: void methods resolve without parsing JSON
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TektiteApiClient, AuthRequiredError, ApiRequestError } from '../src/api'
+import type { RequestUrlFn } from '../src/api'
 import type { IAuthManager } from '../src/types'
 import {
-  makeMultiplayerSettings,
   makeRoomListItem,
   makeRoomDetail,
   makeCreateRoomResult,
@@ -36,237 +37,284 @@ function makeAuth(token: string | null = 'test-token'): IAuthManager {
   }
 }
 
-function makeClient(token: string | null = 'test-token') {
-  const auth = makeAuth(token)
-  const settings = makeMultiplayerSettings({ serverUrl: SERVER })
-  const client = new TektiteApiClient(settings, auth)
-  return { client, auth }
-}
-
-function mockFetch(body: unknown, status = 200) {
+function mockRequestUrl(body: unknown, status = 200): RequestUrlFn {
   return vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
     status,
-    json: () => Promise.resolve(body),
+    headers: {},
+    text: JSON.stringify(body),
+    json: body,
+    arrayBuffer: new ArrayBuffer(0),
   })
 }
 
-function mockFetch204() {
+function mockRequestUrl204(): RequestUrlFn {
   return vi.fn().mockResolvedValue({
-    ok: true,
     status: 204,
-    json: () => { throw new Error('should not parse 204') },
+    headers: {},
+    text: '',
+    json: null,
+    arrayBuffer: new ArrayBuffer(0),
   })
 }
 
-function mockFetchError(status: number, error = 'FORBIDDEN', message = 'Not allowed') {
+function mockRequestUrlError(
+  status: number,
+  error = 'FORBIDDEN',
+  message = 'Not allowed',
+): RequestUrlFn {
+  const body = { error, message, statusCode: status }
   return vi.fn().mockResolvedValue({
-    ok: false,
     status,
-    json: () => Promise.resolve({ error, message, statusCode: status }),
+    headers: {},
+    text: JSON.stringify(body),
+    json: body,
+    arrayBuffer: new ArrayBuffer(0),
   })
 }
-
-let originalFetch: typeof globalThis.fetch
-
-beforeEach(() => {
-  originalFetch = globalThis.fetch
-})
-
-afterEach(() => {
-  globalThis.fetch = originalFetch
-})
 
 // ── Auth guard ──────────────────────────────────────────────────────────────
 
 describe('auth guard', () => {
-  const methods: [string, () => Promise<unknown>][] = (() => {
-    const { client } = makeClient(null)
-    return [
-      ['getVersion', () => client.getVersion()],
-      ['listRooms', () => client.listRooms()],
-      ['createRoom', () => client.createRoom('test')],
-      ['getRoom', () => client.getRoom('guid')],
-      ['deleteRoom', () => client.deleteRoom('guid')],
-      ['getMyRole', () => client.getMyRole('guid')],
-      ['joinRoom', () => client.joinRoom('token')],
-      ['createInvite', () => client.createInvite('guid', 'EDITOR', '7d')],
-      ['revokeInvite', () => client.revokeInvite('guid', 'token')],
-      ['updateMemberRole', () => client.updateMemberRole('guid', 'user', 'EDITOR')],
-      ['removeMember', () => client.removeMember('guid', 'user')],
-    ]
-  })()
+  // All authenticated methods (excludes getVersion which is unauthenticated)
+  const methodNames = [
+    'listRooms',
+    'createRoom',
+    'getRoom',
+    'deleteRoom',
+    'getMyRole',
+    'joinRoom',
+    'createInvite',
+    'revokeInvite',
+    'updateMemberRole',
+    'removeMember',
+  ] as const
 
-  it.each(methods)('%s throws AuthRequiredError when token is null', async (_, call) => {
-    const fetchSpy = vi.fn()
-    globalThis.fetch = fetchSpy as unknown as typeof fetch
-    await expect(call()).rejects.toThrow(AuthRequiredError)
-    expect(fetchSpy).not.toHaveBeenCalled()
+  function callMethod(client: TektiteApiClient, name: string): Promise<unknown> {
+    switch (name) {
+      case 'listRooms': return client.listRooms()
+      case 'createRoom': return client.createRoom('test')
+      case 'getRoom': return client.getRoom('guid')
+      case 'deleteRoom': return client.deleteRoom('guid')
+      case 'getMyRole': return client.getMyRole('guid')
+      case 'joinRoom': return client.joinRoom('token')
+      case 'createInvite': return client.createInvite('guid', 'EDITOR', '7d')
+      case 'revokeInvite': return client.revokeInvite('guid', 'token')
+      case 'updateMemberRole': return client.updateMemberRole('guid', 'user', 'EDITOR')
+      case 'removeMember': return client.removeMember('guid', 'user')
+      default: throw new Error(`unknown method: ${name}`)
+    }
+  }
+
+  it.each(methodNames)('%s throws AuthRequiredError when token is null', async (name) => {
+    const reqFn = vi.fn() as unknown as RequestUrlFn
+    const client = new TektiteApiClient(SERVER, makeAuth(null), reqFn)
+    await expect(callMethod(client, name)).rejects.toThrow(AuthRequiredError)
+    expect(reqFn).not.toHaveBeenCalled()
+  })
+})
+
+// ── getVersion (unauthenticated) ────────────────────────────────────────────
+
+describe('getVersion', () => {
+  it('does not require auth — works when token is null', async () => {
+    const body = { server: '1.0.0', apiVersion: '1', minPluginVersion: '1.0.0' }
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(null), reqFn)
+    const result = await client.getVersion()
+    expect(result).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/version`,
+      method: 'GET',
+    }))
+    // No Authorization header
+    const callHeaders = (reqFn as ReturnType<typeof vi.fn>).mock.calls[0][0].headers
+    expect(callHeaders).not.toHaveProperty('Authorization')
+  })
+
+  it('does not send Authorization header even when authenticated', async () => {
+    const body = { server: '1.0.0', apiVersion: '1', minPluginVersion: '1.0.0' }
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth('some-token'), reqFn)
+    await client.getVersion()
+    const callHeaders = (reqFn as ReturnType<typeof vi.fn>).mock.calls[0][0].headers
+    expect(callHeaders).not.toHaveProperty('Authorization')
   })
 })
 
 // ── Success paths ───────────────────────────────────────────────────────────
 
 describe('success paths', () => {
-  it('getVersion sends GET /api/version with auth header', async () => {
-    const body = { server: '1.0.0', apiVersion: '1', minPluginVersion: '1.0.0' }
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
-    const result = await client.getVersion()
-    expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/version`,
-      expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ Authorization: 'Bearer test-token' }) }),
-    )
-  })
-
-  it('listRooms returns RoomListItem[]', async () => {
+  it('listRooms sends GET /api/rooms with auth header', async () => {
     const body = [makeRoomListItem()]
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     expect(await client.listRooms()).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms`,
+      method: 'GET',
+      headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+    }))
   })
 
   it('createRoom sends POST with name body', async () => {
     const body = makeCreateRoomResult()
-    globalThis.fetch = mockFetch(body, 201) as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl(body, 201)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     const result = await client.createRoom('Q4 Planning')
     expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ name: 'Q4 Planning' }),
-      }),
-    )
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms`,
+      method: 'POST',
+      body: JSON.stringify({ name: 'Q4 Planning' }),
+      contentType: 'application/json',
+    }))
   })
 
   it('getRoom sends GET /api/rooms/:guid', async () => {
     const body = makeRoomDetail()
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
-    const result = await client.getRoom('room-guid')
-    expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid`,
-      expect.objectContaining({ method: 'GET' }),
-    )
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
+    expect(await client.getRoom('room-guid')).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid`,
+      method: 'GET',
+    }))
   })
 
   it('deleteRoom sends DELETE and resolves void', async () => {
-    globalThis.fetch = mockFetch204() as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl204()
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     await expect(client.deleteRoom('room-guid')).resolves.toBeUndefined()
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid`,
-      expect.objectContaining({ method: 'DELETE' }),
-    )
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid`,
+      method: 'DELETE',
+    }))
   })
 
   it('getMyRole sends GET /api/rooms/:guid/me', async () => {
     const body = { role: 'EDITOR' }
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     expect(await client.getMyRole('room-guid')).toEqual(body)
   })
 
   it('joinRoom sends POST /api/rooms/join with token body', async () => {
     const body = makeJoinResult()
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
-    const result = await client.joinRoom('invite-token')
-    expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/join`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ token: 'invite-token' }),
-      }),
-    )
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
+    expect(await client.joinRoom('invite-token')).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/join`,
+      method: 'POST',
+      body: JSON.stringify({ token: 'invite-token' }),
+    }))
   })
 
   it('createInvite sends POST with role and expiresIn', async () => {
     const body = { inviteUrl: 'https://example.com/join?token=abc' }
-    globalThis.fetch = mockFetch(body, 201) as unknown as typeof fetch
-    const { client } = makeClient()
-    const result = await client.createInvite('room-guid', 'EDITOR', '7d')
-    expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid/invites`,
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ role: 'EDITOR', expiresIn: '7d' }),
-      }),
-    )
+    const reqFn = mockRequestUrl(body, 201)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
+    expect(await client.createInvite('room-guid', 'EDITOR', '7d')).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid/invites`,
+      method: 'POST',
+      body: JSON.stringify({ role: 'EDITOR', expiresIn: '7d' }),
+    }))
   })
 
   it('revokeInvite sends DELETE and resolves void', async () => {
-    globalThis.fetch = mockFetch204() as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl204()
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     await expect(client.revokeInvite('room-guid', 'invite-token')).resolves.toBeUndefined()
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid/invites/invite-token`,
-      expect.objectContaining({ method: 'DELETE' }),
-    )
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid/invites/invite-token`,
+      method: 'DELETE',
+    }))
   })
 
   it('updateMemberRole sends PUT with role body', async () => {
     const body = { userId: 'user-1', role: 'VIEWER' }
-    globalThis.fetch = mockFetch(body) as unknown as typeof fetch
-    const { client } = makeClient()
-    const result = await client.updateMemberRole('room-guid', 'user-1', 'VIEWER')
-    expect(result).toEqual(body)
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid/members/user-1`,
-      expect.objectContaining({
-        method: 'PUT',
-        body: JSON.stringify({ role: 'VIEWER' }),
-      }),
-    )
+    const reqFn = mockRequestUrl(body)
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
+    expect(await client.updateMemberRole('room-guid', 'user-1', 'VIEWER')).toEqual(body)
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid/members/user-1`,
+      method: 'PUT',
+      body: JSON.stringify({ role: 'VIEWER' }),
+    }))
   })
 
   it('removeMember sends DELETE and resolves void', async () => {
-    globalThis.fetch = mockFetch204() as unknown as typeof fetch
-    const { client } = makeClient()
+    const reqFn = mockRequestUrl204()
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     await expect(client.removeMember('room-guid', 'user-1')).resolves.toBeUndefined()
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${SERVER}/api/rooms/room-guid/members/user-1`,
-      expect.objectContaining({ method: 'DELETE' }),
-    )
+    expect(reqFn).toHaveBeenCalledWith(expect.objectContaining({
+      url: `${SERVER}/api/rooms/room-guid/members/user-1`,
+      method: 'DELETE',
+    }))
   })
 })
 
 // ── Error paths ─────────────────────────────────────────────────────────────
 
 describe('error paths', () => {
-  it('non-2xx throws ApiRequestError with status and message', async () => {
-    globalThis.fetch = mockFetchError(403, 'FORBIDDEN', 'You do not have access') as unknown as typeof fetch
-    const { client } = makeClient()
+  it('non-2xx throws ApiRequestError with ApiError fields', async () => {
+    const reqFn = mockRequestUrlError(403, 'FORBIDDEN', 'You do not have access')
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     try {
       await client.getRoom('room-guid')
       expect.unreachable('should have thrown')
     } catch (e) {
       expect(e).toBeInstanceOf(ApiRequestError)
-      expect((e as ApiRequestError).statusCode).toBe(403)
-      expect((e as ApiRequestError).errorCode).toBe('FORBIDDEN')
-      expect((e as ApiRequestError).message).toBe('You do not have access')
+      const err = e as ApiRequestError
+      expect(err.statusCode).toBe(403)
+      expect(err.errorCode).toBe('FORBIDDEN')
+      expect(err.message).toBe('You do not have access')
+      expect(err.apiError).toEqual({
+        error: 'FORBIDDEN',
+        message: 'You do not have access',
+        statusCode: 403,
+      })
     }
   })
 
   it('non-JSON error body still throws with status', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: false,
+    const reqFn = vi.fn().mockResolvedValue({
       status: 500,
-      json: () => Promise.reject(new Error('not JSON')),
-    }) as unknown as typeof fetch
-    const { client } = makeClient()
+      headers: {},
+      text: 'Internal Server Error',
+      json: null,
+      arrayBuffer: new ArrayBuffer(0),
+    }) as unknown as RequestUrlFn
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
     try {
       await client.listRooms()
       expect.unreachable('should have thrown')
     } catch (e) {
       expect(e).toBeInstanceOf(ApiRequestError)
-      expect((e as ApiRequestError).statusCode).toBe(500)
+      const err = e as ApiRequestError
+      expect(err.statusCode).toBe(500)
+      expect(err.errorCode).toBe('UNKNOWN')
+    }
+  })
+
+  it('preserves validation details from server', async () => {
+    const details = [{ field: 'name', message: 'Must be between 1 and 500 characters' }]
+    const body = { error: 'VALIDATION_ERROR', message: 'Request validation failed', statusCode: 400, details }
+    const reqFn = vi.fn().mockResolvedValue({
+      status: 400,
+      headers: {},
+      text: JSON.stringify(body),
+      json: body,
+      arrayBuffer: new ArrayBuffer(0),
+    }) as unknown as RequestUrlFn
+    const client = new TektiteApiClient(SERVER, makeAuth(), reqFn)
+    try {
+      await client.createRoom('')
+      expect.unreachable('should have thrown')
+    } catch (e) {
+      const err = e as ApiRequestError
+      expect(err.apiError.details).toEqual(details)
     }
   })
 })

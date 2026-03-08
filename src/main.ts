@@ -9,7 +9,8 @@ import {
   TFolder,
   MarkdownView,
   FileSystemAdapter,
-  Notice
+  Notice,
+  requestUrl,
 } from "obsidian";
 
 import { SharedFolder, SharedTypeSettings } from './sharedTypes'
@@ -43,7 +44,7 @@ export default class Multiplayer extends Plugin {
     console.log("loading multiplayer");
     await this.loadSettings();
     this.authManager = new AuthManager(this.app, this.settings)
-    this.apiClient = new TektiteApiClient(this.settings, this.authManager)
+    this.apiClient = new TektiteApiClient(this.settings.serverUrl, this.authManager, requestUrl)
     this.sharedFolders = [ ]
     this._extensions = []
     this.setup()

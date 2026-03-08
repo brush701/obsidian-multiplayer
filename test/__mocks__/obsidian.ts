@@ -77,3 +77,7 @@ export class MarkdownView {
 }
 
 export class FileSystemAdapter extends DataAdapter {}
+
+export function requestUrl() {
+  throw new Error('requestUrl must be mocked in tests')
+}
