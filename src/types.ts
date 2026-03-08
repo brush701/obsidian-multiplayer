@@ -92,16 +92,28 @@ export interface ApiError {
 
 export type InviteExpiry = '1d' | '7d' | '30d'
 
+// ── Connection status ────────────────────────────────────────────────────────
+
+export enum ConnectionStatus {
+  NotSignedIn = 'NotSignedIn',
+  Connected = 'Connected',
+  Syncing = 'Syncing',
+  Disconnected = 'Disconnected',
+  AuthError = 'AuthError',
+}
+
 // ── Auth boundary ────────────────────────────────────────────────────────────
 
 /** Interface for the authentication boundary — mocked in tests. */
 export interface IAuthManager {
   signIn(): Promise<void>
   signOut(): Promise<void>
+  signOutWithAuthError(): Promise<void>
   restoreSession(): Promise<void>
   getAccessToken(): Promise<string | null>
   handleAuthCallback(params: Record<string, string>): void
   readonly isAuthenticated: boolean
+  readonly hasAuthError: boolean
   readonly userInfo: { email: string; name: string } | null
   on(event: 'auth-changed', handler: () => void): void
   off(event: 'auth-changed', handler: () => void): void

@@ -38,6 +38,7 @@ export class AuthManager implements IAuthManager {
   private _deps: AuthManagerDeps
   private _tokenStore: TokenStore
   private _isAuthenticated = false
+  private _hasAuthError = false
   private _userInfo: { email: string; name: string } | null = null
   private _listeners: Set<() => void> = new Set()
 
@@ -61,6 +62,10 @@ export class AuthManager implements IAuthManager {
 
   get isAuthenticated(): boolean {
     return this._isAuthenticated
+  }
+
+  get hasAuthError(): boolean {
+    return this._hasAuthError
   }
 
   get userInfo(): { email: string; name: string } | null {
@@ -159,6 +164,7 @@ export class AuthManager implements IAuthManager {
       })
 
       this._isAuthenticated = true
+      this._hasAuthError = false
       this._emit('auth-changed')
     } catch {
       new Notice('Sign-in failed — try again.')
@@ -181,6 +187,11 @@ export class AuthManager implements IAuthManager {
     }
 
     this._resolveCallback({ code, state })
+  }
+
+  async signOutWithAuthError(): Promise<void> {
+    this._hasAuthError = true
+    await this.signOut()
   }
 
   async signOut(): Promise<void> {
@@ -257,6 +268,7 @@ export class AuthManager implements IAuthManager {
       })
 
       if (!response.ok) {
+        this._hasAuthError = true
         await this.signOut()
         new Notice('Session expired — please sign in again')
         return null
@@ -277,6 +289,7 @@ export class AuthManager implements IAuthManager {
       this._accessToken = data.access_token
       return data.access_token
     } catch {
+      this._hasAuthError = true
       await this.signOut()
       new Notice('Session expired — please sign in again')
       return null

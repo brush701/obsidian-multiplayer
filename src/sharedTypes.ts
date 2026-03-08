@@ -169,7 +169,7 @@ const usercolors = [
       case 4001:
         this._provider.disconnect()
         new Notice('Session expired — please sign in again.')
-        this.plugin.authManager.signOut()
+        this.plugin.authManager.signOutWithAuthError()
         break
       case 4003:
         new Notice(`Access denied to ${this.settings.name}.`)
@@ -192,6 +192,24 @@ const usercolors = [
     this.destroy()
     this.plugin.saveSettings()
     this.plugin.refreshIconStyles()
+  }
+
+  get wsConnected(): boolean {
+    return this._provider.wsconnected
+  }
+
+  get synced(): boolean {
+    return this._provider.synced
+  }
+
+  onStatusChange(callback: () => void): void {
+    this._provider.on('status', callback)
+    this._provider.on('sync', callback)
+  }
+
+  offStatusChange(callback: () => void): void {
+    this._provider.off('status', callback)
+    this._provider.off('sync', callback)
   }
 
   destroy()
