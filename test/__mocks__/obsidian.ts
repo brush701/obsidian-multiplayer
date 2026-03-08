@@ -2,7 +2,21 @@
 // Only the surface area used by the plugin source is represented here.
 // Tests that need more detail should extend these stubs locally.
 
-export class App {}
+class DataAdapter {
+  private _store = new Map<string, string>()
+  getBasePath(): string { return '/vault' }
+  async store(key: string, value: string): Promise<void> { this._store.set(key, value) }
+  async load(key: string): Promise<string | null> { return this._store.get(key) ?? null }
+  async remove(key: string): Promise<void> { this._store.delete(key) }
+}
+
+class Vault {
+  adapter = new DataAdapter()
+}
+
+export class App {
+  vault = new Vault()
+}
 
 export class Plugin {
   app: App
@@ -55,6 +69,4 @@ export class TFolder {
 export class MarkdownView {
 }
 
-export class FileSystemAdapter {
-  getBasePath(): string { return '/vault' }
-}
+export class FileSystemAdapter extends DataAdapter {}
