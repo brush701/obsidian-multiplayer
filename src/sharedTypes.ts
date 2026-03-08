@@ -46,10 +46,12 @@ const usercolors = [
     this.docs = new Map()
     this._persistence = new IndexeddbPersistence(settings.guid, this.root)
 
-    const wsUrl = `${plugin.settings.serverUrl}/room/${settings.guid}`
-    this._provider = new WebsocketProvider(wsUrl, settings.guid, this.root, { connect: false })
+    const wsBase = `${plugin.settings.serverUrl}/room`
+    this._provider = new WebsocketProvider(wsBase, settings.guid, this.root, { connect: false })
     // TODO(P2): attach token
-    this._provider.connect()
+    if (plugin.settings.serverUrl) {
+      this._provider.connect()
+    }
     this.root.on("update", (update: Uint8Array, origin: any, doc: Y.Doc) => {
       let map = doc.getMap<string>("docs")
       map.forEach((guid, path) => {
@@ -193,10 +195,12 @@ export class SharedDoc {
     this.guid = guid
 
     const serverUrl = parent.plugin.settings.serverUrl
-    const wsUrl = `${serverUrl}/room/${guid}`
-    this._provider = new WebsocketProvider(wsUrl, guid, this.ydoc, { connect: false })
+    const wsBase = `${serverUrl}/room`
+    this._provider = new WebsocketProvider(wsBase, guid, this.ydoc, { connect: false })
     // TODO(P2): attach token
-    this._provider.connect()
+    if (serverUrl) {
+      this._provider.connect()
+    }
 
     const userColor = usercolors[Math.floor(Math.random() * usercolors.length)]
     this._provider.awareness.setLocalStateField('user', {
