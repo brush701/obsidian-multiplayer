@@ -1,11 +1,10 @@
 import type { App } from 'obsidian'
 
-// Obsidian's DataAdapter has undocumented LocalForage-backed methods for
-// key-value storage that don't touch the vault filesystem.
-interface SecretAdapter {
-  store(key: string, value: string): Promise<void>
-  load(key: string): Promise<string | null>
-  remove(key: string): Promise<void>
+// Obsidian's App has undocumented localStorage methods (backed by
+// electron's localStorage) for key-value storage outside the vault.
+interface LocalStorageApp {
+  saveLocalStorage(key: string, value: string | null): void
+  loadLocalStorage(key: string): string | null
 }
 
 export interface StoredTokens {
@@ -25,32 +24,26 @@ const KEYS = {
 } as const
 
 export class TokenStore {
-  private _app: App
+  private _app: LocalStorageApp
 
   constructor(app: App) {
-    this._app = app
+    this._app = app as unknown as LocalStorageApp
   }
 
-  private get _adapter(): SecretAdapter {
-    return this._app.vault.adapter as unknown as SecretAdapter
+  save(tokens: StoredTokens): void {
+    this._app.saveLocalStorage(KEYS.accessToken, tokens.accessToken)
+    this._app.saveLocalStorage(KEYS.refreshToken, tokens.refreshToken)
+    this._app.saveLocalStorage(KEYS.expiresAt, tokens.expiresAt)
+    this._app.saveLocalStorage(KEYS.email, tokens.email)
+    this._app.saveLocalStorage(KEYS.name, tokens.name)
   }
 
-  async save(tokens: StoredTokens): Promise<void> {
-    const adapter = this._adapter
-    await adapter.store(KEYS.accessToken, tokens.accessToken)
-    await adapter.store(KEYS.refreshToken, tokens.refreshToken)
-    await adapter.store(KEYS.expiresAt, tokens.expiresAt)
-    await adapter.store(KEYS.email, tokens.email)
-    await adapter.store(KEYS.name, tokens.name)
-  }
-
-  async load(): Promise<StoredTokens | null> {
-    const adapter = this._adapter
-    const accessToken = await adapter.load(KEYS.accessToken)
-    const refreshToken = await adapter.load(KEYS.refreshToken)
-    const expiresAt = await adapter.load(KEYS.expiresAt)
-    const email = await adapter.load(KEYS.email)
-    const name = await adapter.load(KEYS.name)
+  load(): StoredTokens | null {
+    const accessToken = this._app.loadLocalStorage(KEYS.accessToken)
+    const refreshToken = this._app.loadLocalStorage(KEYS.refreshToken)
+    const expiresAt = this._app.loadLocalStorage(KEYS.expiresAt)
+    const email = this._app.loadLocalStorage(KEYS.email)
+    const name = this._app.loadLocalStorage(KEYS.name)
 
     if (!accessToken || !refreshToken || !expiresAt || !email || !name) {
       return null
@@ -59,12 +52,11 @@ export class TokenStore {
     return { accessToken, refreshToken, expiresAt, email, name }
   }
 
-  async clear(): Promise<void> {
-    const adapter = this._adapter
-    await adapter.remove(KEYS.accessToken)
-    await adapter.remove(KEYS.refreshToken)
-    await adapter.remove(KEYS.expiresAt)
-    await adapter.remove(KEYS.email)
-    await adapter.remove(KEYS.name)
+  clear(): void {
+    this._app.saveLocalStorage(KEYS.accessToken, null)
+    this._app.saveLocalStorage(KEYS.refreshToken, null)
+    this._app.saveLocalStorage(KEYS.expiresAt, null)
+    this._app.saveLocalStorage(KEYS.email, null)
+    this._app.saveLocalStorage(KEYS.name, null)
   }
 }

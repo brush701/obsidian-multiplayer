@@ -3,7 +3,6 @@ import { Notice } from 'obsidian'
 import type { MultiplayerSettings } from './types'
 import type { IAuthManager } from './types'
 import { TokenStore } from './tokenStore'
-import type { StoredTokens } from './tokenStore'
 
 type AuthEvent = 'auth-changed'
 
@@ -129,9 +128,9 @@ export class AuthManager implements IAuthManager {
       const userInfo = await this._fetchUserInfo(tokenResponse.access_token)
       this._userInfo = { email: userInfo.email, name: userInfo.name }
 
-      // Step 8: Persist tokens to SecretStorage
+      // Step 8: Persist tokens to localStorage
       const expiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000).toISOString()
-      await this._tokenStore.save({
+      this._tokenStore.save({
         accessToken: tokenResponse.access_token,
         refreshToken: tokenResponse.refresh_token,
         expiresAt,
@@ -168,17 +167,17 @@ export class AuthManager implements IAuthManager {
     this._isAuthenticated = false
     this._userInfo = null
     this._accessToken = null
-    await this._tokenStore.clear()
+    this._tokenStore.clear()
     this._emit('auth-changed')
   }
 
   async restoreSession(): Promise<void> {
-    const tokens = await this._tokenStore.load()
+    const tokens = this._tokenStore.load()
     if (!tokens) return
 
     const expiry = new Date(tokens.expiresAt)
     if (expiry <= new Date()) {
-      await this._tokenStore.clear()
+      this._tokenStore.clear()
       return
     }
 

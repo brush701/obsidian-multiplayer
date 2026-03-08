@@ -3,11 +3,7 @@
 // Tests that need more detail should extend these stubs locally.
 
 class DataAdapter {
-  private _store = new Map<string, string>()
   getBasePath(): string { return '/vault' }
-  async store(key: string, value: string): Promise<void> { this._store.set(key, value) }
-  async load(key: string): Promise<string | null> { return this._store.get(key) ?? null }
-  async remove(key: string): Promise<void> { this._store.delete(key) }
 }
 
 class Vault {
@@ -16,6 +12,17 @@ class Vault {
 
 export class App {
   vault = new Vault()
+  private _localStorage = new Map<string, string>()
+  saveLocalStorage(key: string, value: string | null): void {
+    if (value === null) {
+      this._localStorage.delete(key)
+    } else {
+      this._localStorage.set(key, value)
+    }
+  }
+  loadLocalStorage(key: string): string | null {
+    return this._localStorage.get(key) ?? null
+  }
 }
 
 export class Plugin {

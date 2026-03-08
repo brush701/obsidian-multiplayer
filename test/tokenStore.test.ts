@@ -26,46 +26,44 @@ const sampleTokens: StoredTokens = {
 }
 
 describe('TokenStore', () => {
-  it('load() returns null on fresh adapter', async () => {
+  it('load() returns null on fresh app', () => {
     const store = createTokenStore()
-    expect(await store.load()).toBeNull()
+    expect(store.load()).toBeNull()
   })
 
-  it('save() then load() returns matching StoredTokens', async () => {
+  it('save() then load() returns matching StoredTokens', () => {
     const store = createTokenStore()
-    await store.save(sampleTokens)
-    const loaded = await store.load()
-    expect(loaded).toEqual(sampleTokens)
+    store.save(sampleTokens)
+    expect(store.load()).toEqual(sampleTokens)
   })
 
-  it('clear() then load() returns null', async () => {
+  it('clear() then load() returns null', () => {
     const store = createTokenStore()
-    await store.save(sampleTokens)
-    await store.clear()
-    expect(await store.load()).toBeNull()
+    store.save(sampleTokens)
+    store.clear()
+    expect(store.load()).toBeNull()
   })
 
-  it('save() then clear() then load() returns null', async () => {
+  it('save() then clear() then load() returns null', () => {
     const store = createTokenStore()
-    await store.save(sampleTokens)
-    await store.clear()
-    const loaded = await store.load()
-    expect(loaded).toBeNull()
+    store.save(sampleTokens)
+    store.clear()
+    expect(store.load()).toBeNull()
   })
 
-  it('load() returns null if only a subset of keys exist', async () => {
+  it('load() returns null if only a subset of keys exist', () => {
     const app = new App()
     // Write only 2 of 5 keys directly
-    await app.vault.adapter.store('mp-access-token', 'partial')
-    await app.vault.adapter.store('mp-user-email', 'partial@test.com')
+    app.saveLocalStorage('mp-access-token', 'partial')
+    app.saveLocalStorage('mp-user-email', 'partial@test.com')
 
     const store = new TokenStore(app)
-    expect(await store.load()).toBeNull()
+    expect(store.load()).toBeNull()
   })
 
-  it('save() overwrites previous values', async () => {
+  it('save() overwrites previous values', () => {
     const store = createTokenStore()
-    await store.save(sampleTokens)
+    store.save(sampleTokens)
 
     const updated: StoredTokens = {
       accessToken: 'new-access',
@@ -74,9 +72,8 @@ describe('TokenStore', () => {
       email: 'bob@company.com',
       name: 'Bob Smith',
     }
-    await store.save(updated)
+    store.save(updated)
 
-    const loaded = await store.load()
-    expect(loaded).toEqual(updated)
+    expect(store.load()).toEqual(updated)
   })
 })
