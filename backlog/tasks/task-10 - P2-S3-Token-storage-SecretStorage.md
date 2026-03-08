@@ -1,10 +1,10 @@
 ---
 id: TASK-10
 title: '[P2-S3] Token storage (SecretStorage)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:26'
-updated_date: '2026-03-08 19:39'
+updated_date: '2026-03-08 20:40'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -12,6 +12,7 @@ dependencies:
   - TASK-9
 references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/43'
+ordinal: 9000
 ---
 
 ## Description
