@@ -13,7 +13,7 @@ import {
 } from "obsidian";
 
 import { SharedFolder, SharedTypeSettings } from './sharedTypes'
-import { MultiplayerSettings } from './types'
+import { MultiplayerSettings, ConnectionStatus } from './types'
 import { AuthManager } from './auth'
 
 import { Extension} from '@codemirror/state'
@@ -34,6 +34,8 @@ export default class Multiplayer extends Plugin {
   sharedFolders: SharedFolder[];
   private _extensions: Extension[];
   private _iconStyleEl: HTMLStyleElement | null = null;
+  private _statusBarEl: HTMLElement | null = null;
+  private _statusChangeHandler = () => this._updateStatusBar();
 
   async onload() {
     console.log("loading multiplayer");
@@ -51,12 +53,16 @@ export default class Multiplayer extends Plugin {
 
     this.authManager.on('auth-changed', () => {
       if (!this.authManager.isAuthenticated) {
-        this.sharedFolders.forEach(f => f.destroy())
+        this.sharedFolders.forEach(f => {
+          this._detachStatusListeners(f)
+          f.destroy()
+        })
         this.sharedFolders = []
         this._extensions.length = 0
         this.app.workspace.updateOptions()
         this.refreshIconStyles()
       }
+      this._updateStatusBar()
     })
 
     this.registerEvent(
@@ -90,12 +96,22 @@ export default class Multiplayer extends Plugin {
 
     this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
+    this._statusBarEl = this.addStatusBarItem();
+    this._statusBarEl.onClickEvent(() => {
+      if (this.authManager.hasAuthError) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const setting = (this.app as any).setting
+        setting.open()
+        setting.openTabById(this.manifest.id)
+      }
+    })
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
-
+      this._attachStatusListeners(newSharedFolder)
       this.sharedFolders.push(newSharedFolder)
     })
+    this._updateStatusBar()
    
     var extensions = this._extensions
     this.app.workspace.on("file-open", file => {
@@ -196,6 +212,35 @@ export default class Multiplayer extends Plugin {
     }).join('\n');
   }
 
+  private _getConnectionStatus(): ConnectionStatus {
+    if (this.authManager.hasAuthError) return ConnectionStatus.AuthError
+    if (!this.authManager.isAuthenticated) return ConnectionStatus.NotSignedIn
+    if (this.sharedFolders.some(f => !f.wsConnected)) return ConnectionStatus.Disconnected
+    if (this.sharedFolders.some(f => !f.synced)) return ConnectionStatus.Syncing
+    return ConnectionStatus.Connected
+  }
+
+  private _updateStatusBar(): void {
+    if (!this._statusBarEl) return
+    const status = this._getConnectionStatus()
+    const labels: Record<ConnectionStatus, string> = {
+      [ConnectionStatus.NotSignedIn]: 'Multiplayer: not signed in',
+      [ConnectionStatus.Connected]: '● Multiplayer',
+      [ConnectionStatus.Syncing]: '⟳ Multiplayer',
+      [ConnectionStatus.Disconnected]: '○ Multiplayer',
+      [ConnectionStatus.AuthError]: '⚠ Multiplayer: sign in again',
+    }
+    this._statusBarEl.setText(labels[status])
+  }
+
+  private _attachStatusListeners(folder: SharedFolder): void {
+    folder.onStatusChange(this._statusChangeHandler)
+  }
+
+  private _detachStatusListeners(folder: SharedFolder): void {
+    folder.offStatusChange(this._statusChangeHandler)
+  }
+
   getSharedFolder(path: string) : SharedFolder {
 
     return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
@@ -205,7 +250,10 @@ export default class Multiplayer extends Plugin {
   
 
   onunload() {
-    this.sharedFolders.forEach(sharedFolder => { sharedFolder.destroy() })
+    this.sharedFolders.forEach(sharedFolder => {
+      this._detachStatusListeners(sharedFolder)
+      sharedFolder.destroy()
+    })
     this._iconStyleEl?.remove();
     console.log("unloading plugin");
     this.saveSettings()
