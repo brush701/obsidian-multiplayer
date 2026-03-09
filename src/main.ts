@@ -409,9 +409,10 @@ export default class Multiplayer extends Plugin {
 	}
 }
 
-class MultiplayerSettingTab extends PluginSettingTab {
+export class MultiplayerSettingTab extends PluginSettingTab {
 	plugin: Multiplayer;
 	private _authSectionEl: HTMLElement | null = null;
+	private _availableRoomsEl: HTMLElement | null = null;
 	private _authChangedHandler: (() => void) | null = null;
 	private _signingIn = false;
 
@@ -453,7 +454,13 @@ class MultiplayerSettingTab extends PluginSettingTab {
 		this._authSectionEl = containerEl.createDiv();
 		this._renderAuthSection();
 
-		this._authChangedHandler = () => this._renderAuthSection();
+		this._availableRoomsEl = containerEl.createDiv();
+		this._renderAvailableRooms();
+
+		this._authChangedHandler = () => {
+			this._renderAuthSection();
+			this._renderAvailableRooms();
+		};
 		this.plugin.authManager.on("auth-changed", this._authChangedHandler);
 	}
 
@@ -507,6 +514,103 @@ class MultiplayerSettingTab extends PluginSettingTab {
 							}
 						});
 				});
+		}
+	}
+
+	private _renderAvailableRooms(): void {
+		if (!this._availableRoomsEl) return;
+		this._availableRoomsEl.empty();
+
+		this._availableRoomsEl.createEl("h3", { text: "Available rooms" });
+
+		if (!this.plugin.authManager.isAuthenticated) {
+			this._availableRoomsEl.createEl("p", {
+				text: "Sign in to see your available rooms.",
+			});
+			return;
+		}
+
+		const statusEl = this._availableRoomsEl.createEl("p", {
+			text: "Loading rooms…",
+		});
+
+		this._loadAvailableRooms(statusEl);
+	}
+
+	private async _loadAvailableRooms(statusEl: HTMLElement): Promise<void> {
+		try {
+			const rooms = await this.plugin.apiClient.listRooms();
+			const existingGuids = new Set(
+				this.plugin.settings.sharedFolders.map((sf) => sf.guid),
+			);
+			const available = rooms.filter(
+				(r) => !existingGuids.has(r.guid),
+			);
+
+			statusEl.remove();
+
+			if (available.length === 0) {
+				this._availableRoomsEl!.createEl("p", {
+					text: "No additional rooms available.",
+				});
+				return;
+			}
+
+			for (const room of available) {
+				new Setting(this._availableRoomsEl!)
+					.setName(room.name)
+					.setDesc(room.role.charAt(0) + room.role.slice(1).toLowerCase())
+					.addButton((btn) => {
+						btn.setButtonText("Add to vault").onClick(() => {
+							new FolderSelectModal(
+								this.app,
+								async (folder) => {
+									const hasOverlap =
+										this.plugin.sharedFolders.some(
+											(sf) =>
+												folder.path.includes(
+													sf.settings.path,
+												) ||
+												sf.settings.path.includes(
+													folder.path,
+												),
+										);
+									if (hasOverlap) {
+										new Notice(
+											"This folder is already a shared folder.",
+										);
+										return;
+									}
+
+									const settings = {
+										guid: room.guid,
+										name: room.name,
+										path: folder.path,
+									};
+									this.plugin.settings.sharedFolders.push(
+										settings,
+									);
+									await this.plugin.saveSettings();
+									const newFolder = new SharedFolder(
+										settings,
+										(
+											this.app.vault
+												.adapter as FileSystemAdapter
+										).getBasePath(),
+										this.plugin,
+									);
+									this.plugin.addSharedFolder(newFolder);
+									new Notice(
+										`Added "${room.name}" to vault.`,
+									);
+									this._renderAvailableRooms();
+								},
+							).open();
+						});
+					});
+			}
+		} catch {
+			statusEl.setText("Could not load rooms.");
 		}
 	}
 }

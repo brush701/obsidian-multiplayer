@@ -1,10 +1,10 @@
 ---
 id: TASK-20
 title: '[P3-S5] InviteModal'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-09 00:25'
+updated_date: '2026-03-09 03:13'
 labels:
   - enhancement
   - 'epic: P3 - Room Management'

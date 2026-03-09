@@ -52,11 +52,18 @@ export class Setting {
   setName(_name: string): this { return this }
   setDesc(_desc: string): this { return this }
   addText(_cb: (_text: unknown) => void): this { return this }
+  addButton(_cb: (_btn: ButtonComponent) => void): this {
+    const btn = new ButtonComponent(null)
+    _cb(btn)
+    return this
+  }
 }
 
 export class ButtonComponent {
   constructor(_containerEl: unknown) {}
   setButtonText(_text: string): this { return this }
+  setWarning(): this { return this }
+  setDisabled(_disabled: boolean): this { return this }
   onClick(_cb: (_e: unknown) => void): this { return this }
 }
 
