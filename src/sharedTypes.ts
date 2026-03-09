@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import { existsSync, readFileSync, open, mkdirSync} from "fs"
 import { dirname } from 'path';
 import { Notice } from 'obsidian';
+import type { RoomRole } from './types';
 import Multiplayer from './main';
 export interface SharedTypeSettings {
   guid: string
@@ -33,6 +34,7 @@ const usercolors = [
   ids: Y.Map<string> // Maps document paths to guids
   docs: Map<string, SharedDoc> // Maps guids to SharedDocs
   plugin: Multiplayer
+  cachedRole: RoomRole | null = null
 
   private _persistence: IndexeddbPersistence
   private _provider: WebsocketProvider
@@ -161,6 +163,16 @@ const usercolors = [
     }
     this._provider.params = { token }
     this._provider.connect()
+    this._fetchRole()
+  }
+
+  private async _fetchRole(): Promise<void> {
+    try {
+      const result = await this.plugin.apiClient.getMyRole(this.settings.guid)
+      this.cachedRole = result.role
+    } catch {
+      // Role fetch is best-effort; menu defaults to showing all items
+    }
   }
 
   private _handleCloseCode(event: CloseEvent | null): void {

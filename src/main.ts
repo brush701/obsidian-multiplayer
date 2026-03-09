@@ -95,19 +95,21 @@ export default class Multiplayer extends Plugin {
 									);
 							});
 
-							menu.addItem((item) => {
-								item.setTitle(
-									`Invite to ${folder.settings.name || "Room"}`,
-								)
-									.setIcon("user-plus")
-									.onClick(() =>
-										new InviteModal(
-											this.app,
-											this,
-											folder,
-										).open(),
-									);
-							});
+							if (folder.cachedRole !== "VIEWER") {
+								menu.addItem((item) => {
+									item.setTitle(
+										`Invite to ${folder.settings.name || "Room"}`,
+									)
+										.setIcon("user-plus")
+										.onClick(() =>
+											new InviteModal(
+												this.app,
+												this,
+												folder,
+											).open(),
+										);
+								});
+							}
 
 							menu.addItem((item) => {
 								item.setTitle("Room members")
