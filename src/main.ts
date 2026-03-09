@@ -176,7 +176,7 @@ export default class Multiplayer extends Plugin {
 		);
 		this._updateStatusBar();
 
-		var extensions = this._extensions;
+		const extensions = this._extensions;
 		this.app.workspace.on("file-open", (file) => {
 			if (file) {
 				const sharedFolder = this.getSharedFolder(file.path);
@@ -192,6 +192,7 @@ export default class Multiplayer extends Plugin {
 							view.editor.setValue(sharedDoc.text);
 							this.registerEditorExtension(extensions);
 							this.app.workspace.updateOptions();
+							// eslint-disable-next-line @typescript-eslint/no-explicit-any
 							const cmView = (view.editor as any)
 								.cm as EditorView;
 							if (cmView) sharedDoc.setEditorView(cmView);
@@ -203,26 +204,27 @@ export default class Multiplayer extends Plugin {
 		});
 
 		this.app.vault.on("create", (file) => {
-			let folder = this.getSharedFolder(file.path);
+			const folder = this.getSharedFolder(file.path);
 			if (folder) {
 				folder.createDoc(file.path);
 			}
 		});
 
 		this.app.vault.on("delete", (file) => {
-			let folder = this.getSharedFolder(file.path);
+			const folder = this.getSharedFolder(file.path);
 			if (folder) {
 				folder.deleteDoc(file.path);
 			}
 		});
 
 		this.app.vault.on("rename", (file, oldPath) => {
-			let folder = this.getSharedFolder(oldPath);
+			const folder = this.getSharedFolder(oldPath);
 			if (folder) {
 				folder.renameDoc(file.path, oldPath);
 			}
 		});
 
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
 		const plugin = this;
 
 		const patchOnUnloadFile = around(MarkdownView.prototype, {
@@ -545,6 +547,9 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 	}
 
 	private async _loadAvailableRooms(generation: number): Promise<void> {
+		const el = this._availableRoomsEl;
+		if (!el) return;
+
 		try {
 			const rooms = await this.plugin.apiClient.listRooms();
 
@@ -555,20 +560,20 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 			);
 			const available = rooms.filter((r) => !existingGuids.has(r.guid));
 
-			this._availableRoomsEl!.empty();
-			this._availableRoomsEl!.createEl("h3", {
+			el.empty();
+			el.createEl("h3", {
 				text: "Available rooms",
 			});
 
 			if (available.length === 0) {
-				this._availableRoomsEl!.createEl("p", {
+				el.createEl("p", {
 					text: "No additional rooms available.",
 				});
 				return;
 			}
 
 			for (const room of available) {
-				new Setting(this._availableRoomsEl!)
+				new Setting(el)
 					.setName(room.name)
 					.setDesc(
 						room.role.charAt(0) + room.role.slice(1).toLowerCase(),
@@ -620,11 +625,11 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 		} catch {
 			if (generation !== this._loadGeneration) return;
 
-			this._availableRoomsEl!.empty();
-			this._availableRoomsEl!.createEl("h3", {
+			el.empty();
+			el.createEl("h3", {
 				text: "Available rooms",
 			});
-			this._availableRoomsEl!.createEl("p", {
+			el.createEl("p", {
 				text: "Could not load rooms.",
 			});
 		}

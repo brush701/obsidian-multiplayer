@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, vi } from "vitest";
 
 // Mock system-boundary dependencies before importing
 vi.mock("y-indexeddb", () => ({

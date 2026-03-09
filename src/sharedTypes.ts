@@ -69,12 +69,13 @@ export class SharedFolder {
 		}
 		this.root.on(
 			"update",
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			(update: Uint8Array, origin: any, doc: Y.Doc) => {
-				let map = doc.getMap<string>("docs");
+				const map = doc.getMap<string>("docs");
 				map.forEach((guid, path) => {
-					let fullPath = this._vaultRoot + path;
+					const fullPath = this._vaultRoot + path;
 					if (!existsSync(fullPath)) {
-						let dir = dirname(fullPath);
+						const dir = dirname(fullPath);
 						if (!existsSync(dir)) {
 							mkdirSync(dir, { recursive: true });
 						}
@@ -82,7 +83,7 @@ export class SharedFolder {
 					}
 				});
 				// delete files that are no longer shared
-				let files = this.plugin.app.vault.getFiles();
+				const files = this.plugin.app.vault.getFiles();
 				files.forEach((file) => {
 					// if the file is in the shared folder and not in the map, move it to the Trash
 					if (
@@ -97,7 +98,7 @@ export class SharedFolder {
 	}
 
 	// Get the shared doc for a file
-	getDoc(path: string, create: boolean = true): SharedDoc {
+	getDoc(path: string, create = true): SharedDoc {
 		if (!path.startsWith(this.settings.path)) {
 			throw new Error("Path is not in shared folder: " + path);
 		}
@@ -117,7 +118,7 @@ export class SharedFolder {
 	}
 
 	// Create a new shared doc
-	createDoc(path: string, loadFromDisk: boolean = false): SharedDoc {
+	createDoc(path: string, loadFromDisk = false): SharedDoc {
 		if (!path.startsWith(this.settings.path)) {
 			throw new Error("Path is not in shared folder: " + path);
 		}
@@ -128,7 +129,7 @@ export class SharedFolder {
 
 		const doc = new SharedDoc(path, guid, this);
 
-		var contents = "";
+		let contents = "";
 		if (loadFromDisk && existsSync(this._vaultRoot + path)) {
 			contents = readFileSync(this._vaultRoot + path, "utf-8");
 		}
