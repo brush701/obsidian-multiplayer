@@ -1,217 +1,263 @@
-'use strict';
+"use strict";
 
 import {
-  App,
-  Plugin,
-  PluginSettingTab,
-  Setting,
-  TFile,
-  TFolder,
-  MarkdownView,
-  FileSystemAdapter,
-  Notice,
-  requestUrl,
+	App,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFile,
+	TFolder,
+	MarkdownView,
+	FileSystemAdapter,
+	Notice,
+	requestUrl,
 } from "obsidian";
 
-import { SharedFolder, SharedTypeSettings } from './sharedTypes'
-import { MultiplayerSettings, ConnectionStatus } from './types'
-import { AuthManager } from './auth'
-import { TektiteApiClient } from './api'
+import { SharedFolder, SharedTypeSettings } from "./sharedTypes";
+import { MultiplayerSettings, ConnectionStatus } from "./types";
+import { AuthManager } from "./auth";
+import { TektiteApiClient } from "./api";
 
-import { Extension} from '@codemirror/state'
-import { around } from "monkey-around"
-import { SharedFolderModal, UnshareFolderModal, InviteModal, MembersModal, FolderSelectModal } from "./modals";
+import { Extension } from "@codemirror/state";
+import { around } from "monkey-around";
+import {
+	SharedFolderModal,
+	UnshareFolderModal,
+	InviteModal,
+	MembersModal,
+	FolderSelectModal,
+} from "./modals";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
-  serverUrl: '',
-  username: '',
-  sharedFolders: [],
+	serverUrl: "",
+	username: "",
+	sharedFolders: [],
 };
 
-const ICON_SVG_URI = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='18' cy='5' r='3'%3E%3C/circle%3E%3Ccircle cx='6' cy='12' r='3'%3E%3C/circle%3E%3Ccircle cx='18' cy='19' r='3'%3E%3C/circle%3E%3Cline x1='8.59' y1='13.51' x2='15.42' y2='17.49'%3E%3C/line%3E%3Cline x1='15.41' y1='6.51' x2='8.59' y2='10.49'%3E%3C/line%3E%3C/svg%3E")`
+const ICON_SVG_URI = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='18' cy='5' r='3'%3E%3C/circle%3E%3Ccircle cx='6' cy='12' r='3'%3E%3C/circle%3E%3Ccircle cx='18' cy='19' r='3'%3E%3C/circle%3E%3Cline x1='8.59' y1='13.51' x2='15.42' y2='17.49'%3E%3C/line%3E%3Cline x1='15.41' y1='6.51' x2='8.59' y2='10.49'%3E%3C/line%3E%3C/svg%3E")`;
 
 export default class Multiplayer extends Plugin {
-  settings: MultiplayerSettings;
-  authManager: AuthManager;
-  apiClient: TektiteApiClient;
-  sharedFolders: SharedFolder[];
-  private _extensions: Extension[];
-  private _iconStyleEl: HTMLStyleElement | null = null;
-  private _statusBarEl: HTMLElement | null = null;
-  private _statusChangeHandler = () => this._updateStatusBar();
+	settings: MultiplayerSettings;
+	authManager: AuthManager;
+	apiClient: TektiteApiClient;
+	sharedFolders: SharedFolder[];
+	private _extensions: Extension[];
+	private _iconStyleEl: HTMLStyleElement | null = null;
+	private _statusBarEl: HTMLElement | null = null;
+	private _statusChangeHandler = () => this._updateStatusBar();
 
-  async onload() {
-    console.log("loading multiplayer");
-    await this.loadSettings();
-    this.authManager = new AuthManager(this.app, this.settings)
-    this.apiClient = new TektiteApiClient(this.settings.serverUrl, this.authManager, requestUrl)
-    this.sharedFolders = [ ]
-    this._extensions = []
-    this.setup()
-  }
+	async onload() {
+		console.log("loading multiplayer");
+		await this.loadSettings();
+		this.authManager = new AuthManager(this.app, this.settings);
+		this.apiClient = new TektiteApiClient(
+			this.settings.serverUrl,
+			this.authManager,
+			requestUrl,
+		);
+		this.sharedFolders = [];
+		this._extensions = [];
+		this.setup();
+	}
 
-  setup() {
-    this.authManager.on('auth-changed', () => {
-      if (!this.authManager.isAuthenticated) {
-        this.sharedFolders.forEach(f => {
-          this._detachStatusListeners(f)
-          f.destroy()
-        })
-        this.sharedFolders = []
-        this._extensions.length = 0
-        this.app.workspace.updateOptions()
-        this.refreshIconStyles()
-      }
-      this._updateStatusBar()
-    })
+	setup() {
+		this.authManager.on("auth-changed", () => {
+			if (!this.authManager.isAuthenticated) {
+				this.sharedFolders.forEach((f) => {
+					this._detachStatusListeners(f);
+					f.destroy();
+				});
+				this.sharedFolders = [];
+				this._extensions.length = 0;
+				this.app.workspace.updateOptions();
+				this.refreshIconStyles();
+			}
+			this._updateStatusBar();
+		});
 
-    this.registerEvent(
-      this.app.workspace.on('file-menu', (menu, file: TFile) => {
-        // Add a menu item to the folder context menu to create a board
-        if (file instanceof TFolder) {
-          const isShared = this.sharedFolders.some(folder => {
-            if (file.path.contains(folder.settings.path)) {
-              menu.addItem((item) => {
-                item
-                  .setTitle('Delete Multiplayer Shared Folder')
-                  .setIcon('dot-network')
-                  .onClick(() => new UnshareFolderModal(this.app, this, folder).open());
-              })
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file: TFile) => {
+				// Add a menu item to the folder context menu to create a board
+				if (file instanceof TFolder) {
+					const isShared = this.sharedFolders.some((folder) => {
+						if (file.path.contains(folder.settings.path)) {
+							menu.addItem((item) => {
+								item.setTitle(
+									"Delete Multiplayer Shared Folder",
+								)
+									.setIcon("dot-network")
+									.onClick(() =>
+										new UnshareFolderModal(
+											this.app,
+											this,
+											folder,
+										).open(),
+									);
+							});
 
-              menu.addItem((item) => {
-                item
-                  .setTitle(`Invite to ${folder.settings.name || 'Room'}`)
-                  .setIcon('user-plus')
-                  .onClick(() => new InviteModal(this.app, this, folder).open());
-              })
+							menu.addItem((item) => {
+								item.setTitle(
+									`Invite to ${folder.settings.name || "Room"}`,
+								)
+									.setIcon("user-plus")
+									.onClick(() =>
+										new InviteModal(
+											this.app,
+											this,
+											folder,
+										).open(),
+									);
+							});
 
-              menu.addItem((item) => {
-                item
-                  .setTitle('Room members')
-                  .setIcon('users')
-                  .onClick(() => new MembersModal(this.app, this, folder).open());
-              })
+							menu.addItem((item) => {
+								item.setTitle("Room members")
+									.setIcon("users")
+									.onClick(() =>
+										new MembersModal(
+											this.app,
+											this,
+											folder,
+										).open(),
+									);
+							});
 
+							return true;
+						}
+					});
 
-              return true
-            }
-          })
+					if (!isShared) {
+						menu.addItem((item) => {
+							item.setTitle("New Multiplayer Shared Folder")
+								.setIcon("dot-network")
+								.onClick(() =>
+									new SharedFolderModal(
+										this.app,
+										this,
+										file,
+									).open(),
+								);
+						});
+					}
+				}
+			}),
+		);
 
-          if (!isShared) {
-            menu.addItem((item) => {
-              item
-                .setTitle('New Multiplayer Shared Folder')
-                .setIcon('dot-network')
-                .onClick(() => new SharedFolderModal(this.app, this, file).open());
-            });
-          }
-        }
-      })
-    );
+		this.addSettingTab(new MultiplayerSettingTab(this.app, this));
 
-    this.addSettingTab(new MultiplayerSettingTab(this.app, this));
+		this._statusBarEl = this.addStatusBarItem();
+		this._statusBarEl.onClickEvent(() => {
+			if (this.authManager.hasAuthError) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const setting = (this.app as any).setting;
+				setting.open();
+				setting.openTabById(this.manifest.id);
+			}
+		});
 
-    this._statusBarEl = this.addStatusBarItem();
-    this._statusBarEl.onClickEvent(() => {
-      if (this.authManager.hasAuthError) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const setting = (this.app as any).setting
-        setting.open()
-        setting.openTabById(this.manifest.id)
-      }
-    })
+		this.registerObsidianProtocolHandler("multiplayer/join", (params) =>
+			this._handleJoinProtocol(params),
+		);
 
-    this.registerObsidianProtocolHandler('multiplayer/join', (params) => this._handleJoinProtocol(params));
+		this.settings.sharedFolders.forEach(
+			(sharedFolder: SharedTypeSettings) => {
+				const newSharedFolder = new SharedFolder(
+					sharedFolder,
+					(this.app.vault.adapter as FileSystemAdapter).getBasePath(),
+					this,
+				);
+				this._attachStatusListeners(newSharedFolder);
+				this.sharedFolders.push(newSharedFolder);
+			},
+		);
+		this._updateStatusBar();
 
-    this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
-      const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
-      this._attachStatusListeners(newSharedFolder)
-      this.sharedFolders.push(newSharedFolder)
-    })
-    this._updateStatusBar()
+		var extensions = this._extensions;
+		this.app.workspace.on("file-open", (file) => {
+			if (file) {
+				const sharedFolder = this.getSharedFolder(file.path);
+				if (sharedFolder) {
+					const sharedDoc = sharedFolder.getDoc(file.path);
+					sharedDoc.connect();
+					const view =
+						this.app.workspace.getActiveViewOfType(MarkdownView);
+					if (view) {
+						extensions.push(sharedDoc.binding);
+						sharedDoc.onceSynced().then(() => {
+							view.editor.setValue(sharedDoc.text);
+							this.registerEditorExtension(extensions);
+							this.app.workspace.updateOptions();
+							console.log("binding yjs");
+						});
+					}
+				}
+			}
+		});
 
-    var extensions = this._extensions
-    this.app.workspace.on("file-open", file => {
-      if (file) {
-        const sharedFolder = this.getSharedFolder(file.path)
-        if (sharedFolder) {
-          const sharedDoc = sharedFolder.getDoc(file.path)
-          sharedDoc.connect()
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView)
-          if (view) {
-            extensions.push(sharedDoc.binding)
-            sharedDoc.onceSynced().then(() => {
-              view.editor.setValue(sharedDoc.text)
-              this.registerEditorExtension(extensions)
-              this.app.workspace.updateOptions()
-              console.log("binding yjs")
-            })
-          }
-        }
-      }
-    })
+		this.app.vault.on("create", (file) => {
+			let folder = this.getSharedFolder(file.path);
+			if (folder) {
+				folder.createDoc(file.path);
+			}
+		});
 
-    this.app.vault.on("create", file => {
-      let folder = this.getSharedFolder(file.path)
-      if (folder) {
-        folder.createDoc(file.path)
-      }
-    })
+		this.app.vault.on("delete", (file) => {
+			let folder = this.getSharedFolder(file.path);
+			if (folder) {
+				folder.deleteDoc(file.path);
+			}
+		});
 
-    this.app.vault.on("delete", file => {
-      let folder = this.getSharedFolder(file.path)
-      if (folder) {
-        folder.deleteDoc(file.path)
-      }
-    })
+		this.app.vault.on("rename", (file, oldPath) => {
+			let folder = this.getSharedFolder(oldPath);
+			if (folder) {
+				folder.renameDoc(file.path, oldPath);
+			}
+		});
 
-    this.app.vault.on("rename", (file, oldPath) => {
-      let folder = this.getSharedFolder(oldPath)
-      if (folder) {
-        folder.renameDoc(file.path, oldPath)
-      }
+		const plugin = this;
 
-    })
+		const patchOnUnloadFile = around(MarkdownView.prototype, {
+			// replace MarkdownView.onLoadFile() with the following function
+			onUnloadFile(old) {
+				// old is the original onLoadFile function
+				return function (file) {
+					// onLoadFile takes one argument, file
 
-    const plugin = this
+					const sharedFolder = plugin.getSharedFolder(file.path);
 
-    const patchOnUnloadFile = around(MarkdownView.prototype, {
-      // replace MarkdownView.onLoadFile() with the following function
-      onUnloadFile(old) { // old is the original onLoadFile function
-        return function (file) { // onLoadFile takes one argument, file
+					if (sharedFolder) {
+						try {
+							const subdoc = sharedFolder.getDoc(
+								file.path,
+								false,
+							);
+							console.log("disconnecting room", subdoc.path);
+							subdoc.close();
+							extensions.length = 0;
+							this.app.workspace.updateOptions();
+						} catch (e) {
+							console.log(e.message);
+						}
+					}
+					return old.call(this, file); // now call the orignal function and bind the current scope to it
+				};
+			},
+		});
 
-          const sharedFolder = plugin.getSharedFolder(file.path)
+		// register the patches with Obsidian's register method so that it gets unloaded properly
+		this.register(patchOnUnloadFile);
 
-          if (sharedFolder) {
-            try {
-              const subdoc = sharedFolder.getDoc(file.path, false)
-              console.log('disconnecting room', subdoc.path)
-              subdoc.close()
-              extensions.length = 0
-              this.app.workspace.updateOptions()
-            }
-            catch(e) {
-              console.log(e.message)
-            }
-          }
-          return old.call(this, file); // now call the orignal function and bind the current scope to it
-        }
-      }
-    });
+		this.refreshIconStyles();
+	}
 
-    // register the patches with Obsidian's register method so that it gets unloaded properly
-    this.register(patchOnUnloadFile);
-
-    this.refreshIconStyles();
-  }
-
-  refreshIconStyles() {
-    if (!this._iconStyleEl) {
-      this._iconStyleEl = document.head.createEl('style');
-    }
-    this._iconStyleEl.textContent = this.sharedFolders.map(folder => {
-      const path = CSS.escape(folder.settings.path);
-      return `.nav-folder-title[data-path="${path}"]::before {
+	refreshIconStyles() {
+		if (!this._iconStyleEl) {
+			this._iconStyleEl = document.head.createEl("style");
+		}
+		this._iconStyleEl.textContent = this.sharedFolders
+			.map((folder) => {
+				const path = CSS.escape(folder.settings.path);
+				return `.nav-folder-title[data-path="${path}"]::before {
   content: '';
   display: inline-block;
   width: 1em;
@@ -226,222 +272,237 @@ export default class Multiplayer extends Plugin {
   mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
 }`;
-    }).join('\n');
-  }
+			})
+			.join("\n");
+	}
 
-  private _getConnectionStatus(): ConnectionStatus {
-    if (this.authManager.hasAuthError) return ConnectionStatus.AuthError
-    if (!this.authManager.isAuthenticated) return ConnectionStatus.NotSignedIn
-    if (this.sharedFolders.some(f => !f.wsConnected)) return ConnectionStatus.Disconnected
-    if (this.sharedFolders.some(f => !f.synced)) return ConnectionStatus.Syncing
-    return ConnectionStatus.Connected
-  }
+	private _getConnectionStatus(): ConnectionStatus {
+		if (this.authManager.hasAuthError) return ConnectionStatus.AuthError;
+		if (!this.authManager.isAuthenticated)
+			return ConnectionStatus.NotSignedIn;
+		if (this.sharedFolders.some((f) => !f.wsConnected))
+			return ConnectionStatus.Disconnected;
+		if (this.sharedFolders.some((f) => !f.synced))
+			return ConnectionStatus.Syncing;
+		return ConnectionStatus.Connected;
+	}
 
-  private _updateStatusBar(): void {
-    if (!this._statusBarEl) return
-    const status = this._getConnectionStatus()
-    const labels: Record<ConnectionStatus, string> = {
-      [ConnectionStatus.NotSignedIn]: 'Multiplayer: not signed in',
-      [ConnectionStatus.Connected]: '● Multiplayer',
-      [ConnectionStatus.Syncing]: '⟳ Multiplayer',
-      [ConnectionStatus.Disconnected]: '○ Multiplayer',
-      [ConnectionStatus.AuthError]: '⚠ Multiplayer: sign in again',
-    }
-    this._statusBarEl.setText(labels[status])
-  }
+	private _updateStatusBar(): void {
+		if (!this._statusBarEl) return;
+		const status = this._getConnectionStatus();
+		const labels: Record<ConnectionStatus, string> = {
+			[ConnectionStatus.NotSignedIn]: "Multiplayer: not signed in",
+			[ConnectionStatus.Connected]: "● Multiplayer",
+			[ConnectionStatus.Syncing]: "⟳ Multiplayer",
+			[ConnectionStatus.Disconnected]: "○ Multiplayer",
+			[ConnectionStatus.AuthError]: "⚠ Multiplayer: sign in again",
+		};
+		this._statusBarEl.setText(labels[status]);
+	}
 
-  private _attachStatusListeners(folder: SharedFolder): void {
-    folder.onStatusChange(this._statusChangeHandler)
-  }
+	private _attachStatusListeners(folder: SharedFolder): void {
+		folder.onStatusChange(this._statusChangeHandler);
+	}
 
-  private _detachStatusListeners(folder: SharedFolder): void {
-    folder.offStatusChange(this._statusChangeHandler)
-  }
+	private _detachStatusListeners(folder: SharedFolder): void {
+		folder.offStatusChange(this._statusChangeHandler);
+	}
 
-  private _handleJoinProtocol(params: Record<string, string>): void {
-    const { guid, name, server } = params;
+	private _handleJoinProtocol(params: Record<string, string>): void {
+		const { guid, name, server } = params;
 
-    if (!guid || !name) {
-      new Notice('Invalid invite link: missing room information.');
-      return;
-    }
+		if (!guid || !name) {
+			new Notice("Invalid invite link: missing room information.");
+			return;
+		}
 
-    if (!this.authManager.isAuthenticated) {
-      new Notice('Sign in first.');
-      return;
-    }
+		if (!this.authManager.isAuthenticated) {
+			new Notice("Sign in first.");
+			return;
+		}
 
-    if (!this.settings.serverUrl) {
-      new Notice('Configure a server URL in settings first.');
-      return;
-    }
+		if (!this.settings.serverUrl) {
+			new Notice("Configure a server URL in settings first.");
+			return;
+		}
 
-    if (server) {
-      const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
-      if (normalise(server) !== normalise(this.settings.serverUrl)) {
-        new Notice('This invite is for a different server.');
-        return;
-      }
-    }
+		if (server) {
+			const normalise = (u: string) =>
+				u.replace(/\/+$/, "").toLowerCase();
+			if (normalise(server) !== normalise(this.settings.serverUrl)) {
+				new Notice("This invite is for a different server.");
+				return;
+			}
+		}
 
-    if (this.sharedFolders.some(sf => sf.settings.guid === guid)) {
-      new Notice('You are already in this room.');
-      return;
-    }
+		if (this.sharedFolders.some((sf) => sf.settings.guid === guid)) {
+			new Notice("You are already in this room.");
+			return;
+		}
 
-    new FolderSelectModal(this.app, async (folder) => {
-      try {
-        const hasOverlap = this.sharedFolders.some(sf =>
-          folder.path.includes(sf.settings.path) || sf.settings.path.includes(folder.path)
-        );
-        if (hasOverlap) {
-          new Notice('This folder is already a shared folder.');
-          return;
-        }
+		new FolderSelectModal(this.app, async (folder) => {
+			try {
+				const hasOverlap = this.sharedFolders.some(
+					(sf) =>
+						folder.path.includes(sf.settings.path) ||
+						sf.settings.path.includes(folder.path),
+				);
+				if (hasOverlap) {
+					new Notice("This folder is already a shared folder.");
+					return;
+				}
 
-        const settings = { guid, name, path: folder.path };
-        this.settings.sharedFolders.push(settings);
-        await this.saveSettings();
-        const newFolder = new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this);
-        this.addSharedFolder(newFolder);
-        new Notice(`Joined room "${name}".`);
-      } catch (e) {
-        new Notice('Could not join room: unexpected error.');
-        console.error('multiplayer: join protocol error', e);
-      }
-    }).open();
-  }
+				const settings = { guid, name, path: folder.path };
+				this.settings.sharedFolders.push(settings);
+				await this.saveSettings();
+				const newFolder = new SharedFolder(
+					settings,
+					(this.app.vault.adapter as FileSystemAdapter).getBasePath(),
+					this,
+				);
+				this.addSharedFolder(newFolder);
+				new Notice(`Joined room "${name}".`);
+			} catch (e) {
+				new Notice("Could not join room: unexpected error.");
+				console.error("multiplayer: join protocol error", e);
+			}
+		}).open();
+	}
 
-  addSharedFolder(folder: SharedFolder): void {
-    this._attachStatusListeners(folder)
-    this.sharedFolders.push(folder)
-    this.refreshIconStyles()
-    this._updateStatusBar()
-  }
+	addSharedFolder(folder: SharedFolder): void {
+		this._attachStatusListeners(folder);
+		this.sharedFolders.push(folder);
+		this.refreshIconStyles();
+		this._updateStatusBar();
+	}
 
-  getSharedFolder(path: string) : SharedFolder {
+	getSharedFolder(path: string): SharedFolder {
+		return this.sharedFolders.find((sharedFolder: SharedFolder) =>
+			path.contains(sharedFolder.settings.path),
+		);
+	}
 
-    return this.sharedFolders.find((sharedFolder: SharedFolder) => path.contains(sharedFolder.settings.path))
+	onunload() {
+		this.authManager.destroy();
+		this.sharedFolders.forEach((sharedFolder) => {
+			this._detachStatusListeners(sharedFolder);
+			sharedFolder.destroy();
+		});
+		this._iconStyleEl?.remove();
+		console.log("unloading plugin");
+		this.saveSettings();
+	}
 
-  }
-
-
-
-  onunload() {
-    this.authManager.destroy()
-    this.sharedFolders.forEach(sharedFolder => {
-      this._detachStatusListeners(sharedFolder)
-      sharedFolder.destroy()
-    })
-    this._iconStyleEl?.remove();
-    console.log("unloading plugin");
-    this.saveSettings()
-  }
-
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-  }
-  async saveSettings() {
-    await this.saveData(this.settings);
-  }
+	async loadSettings() {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData(),
+		);
+	}
+	async saveSettings() {
+		await this.saveData(this.settings);
+	}
 }
 
 class MultiplayerSettingTab extends PluginSettingTab {
+	plugin: Multiplayer;
+	private _authSectionEl: HTMLElement | null = null;
+	private _authChangedHandler: (() => void) | null = null;
+	private _signingIn = false;
 
-  plugin: Multiplayer;
-  private _authSectionEl: HTMLElement | null = null;
-  private _authChangedHandler: (() => void) | null = null;
-  private _signingIn = false;
+	constructor(app: App, plugin: Multiplayer) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
 
-  constructor(app: App, plugin: Multiplayer) {
-    super(app, plugin);
-    this.plugin = plugin;
-  }
+	display(): void {
+		this._unregisterAuthListener();
 
-  display(): void {
-    this._unregisterAuthListener();
+		const { containerEl } = this;
+		containerEl.empty();
+		containerEl.createEl("h2", { text: "Multiplayer" });
 
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Multiplayer" });
+		new Setting(containerEl)
+			.setName("Server URL")
+			.setDesc("e.g. https://multiplayer.company.com")
+			.addText((text) => {
+				text.setValue(this.plugin.settings.serverUrl);
+				text.onChange((value) => {
+					this.plugin.settings.serverUrl = value;
+					this.plugin.saveSettings();
+					this._renderAuthSection();
+				});
+			});
 
-    new Setting(containerEl)
-      .setName("Server URL")
-      .setDesc("e.g. https://multiplayer.company.com")
-      .addText((text) => {
-        text.setValue(this.plugin.settings.serverUrl)
-        text.onChange(value => {
-          this.plugin.settings.serverUrl = value;
-          this.plugin.saveSettings();
-          this._renderAuthSection();
-        })
-      })
+		new Setting(containerEl)
+			.setName("Username")
+			.setDesc("The name that others will see over your caret")
+			.addText((text) => {
+				text.setValue(this.plugin.settings.username);
+				text.onChange((value) => {
+					this.plugin.settings.username = value;
+					this.plugin.saveSettings();
+				});
+			});
 
-    new Setting(containerEl)
-      .setName("Username")
-      .setDesc("The name that others will see over your caret")
-      .addText((text) => {
-        text.setValue(this.plugin.settings.username)
-        text.onChange(value => {
-          this.plugin.settings.username = value;
-          this.plugin.saveSettings();
-        })
-      })
+		this._authSectionEl = containerEl.createDiv();
+		this._renderAuthSection();
 
-    this._authSectionEl = containerEl.createDiv();
-    this._renderAuthSection();
+		this._authChangedHandler = () => this._renderAuthSection();
+		this.plugin.authManager.on("auth-changed", this._authChangedHandler);
+	}
 
-    this._authChangedHandler = () => this._renderAuthSection();
-    this.plugin.authManager.on('auth-changed', this._authChangedHandler);
-  }
+	hide(): void {
+		this._unregisterAuthListener();
+	}
 
-  hide(): void {
-    this._unregisterAuthListener();
-  }
+	private _unregisterAuthListener(): void {
+		if (this._authChangedHandler) {
+			this.plugin.authManager.off(
+				"auth-changed",
+				this._authChangedHandler,
+			);
+			this._authChangedHandler = null;
+		}
+	}
 
-  private _unregisterAuthListener(): void {
-    if (this._authChangedHandler) {
-      this.plugin.authManager.off('auth-changed', this._authChangedHandler);
-      this._authChangedHandler = null;
-    }
-  }
+	private _renderAuthSection(): void {
+		if (!this._authSectionEl) return;
+		this._authSectionEl.empty();
 
-  private _renderAuthSection(): void {
-    if (!this._authSectionEl) return;
-    this._authSectionEl.empty();
+		const { authManager } = this.plugin;
 
-    const { authManager } = this.plugin;
-
-    if (authManager.isAuthenticated) {
-      const email = authManager.userInfo?.email ?? 'unknown';
-      new Setting(this._authSectionEl)
-        .setName(`● Signed in as ${email}`)
-        .addButton(btn => {
-          btn.setButtonText('Sign Out')
-            .setWarning()
-            .onClick(async () => {
-              await authManager.signOut();
-            })
-        })
-    } else {
-      const buttonText = this._signingIn ? 'Signing in…' : 'Sign In';
-      const disabled = !this.plugin.settings.serverUrl || this._signingIn;
-      new Setting(this._authSectionEl)
-        .setName('○ Not signed in')
-        .addButton(btn => {
-          btn.setButtonText(buttonText)
-            .setDisabled(disabled)
-            .onClick(async () => {
-              this._signingIn = true;
-              this._renderAuthSection();
-              try {
-                await authManager.signIn();
-              } finally {
-                this._signingIn = false;
-                this._renderAuthSection();
-              }
-            })
-        })
-    }
-  }
+		if (authManager.isAuthenticated) {
+			const email = authManager.userInfo?.email ?? "unknown";
+			new Setting(this._authSectionEl)
+				.setName(`● Signed in as ${email}`)
+				.addButton((btn) => {
+					btn.setButtonText("Sign Out")
+						.setWarning()
+						.onClick(async () => {
+							await authManager.signOut();
+						});
+				});
+		} else {
+			const buttonText = this._signingIn ? "Signing in…" : "Sign In";
+			const disabled = !this.plugin.settings.serverUrl || this._signingIn;
+			new Setting(this._authSectionEl)
+				.setName("○ Not signed in")
+				.addButton((btn) => {
+					btn.setButtonText(buttonText)
+						.setDisabled(disabled)
+						.onClick(async () => {
+							this._signingIn = true;
+							this._renderAuthSection();
+							try {
+								await authManager.signIn();
+							} finally {
+								this._signingIn = false;
+								this._renderAuthSection();
+							}
+						});
+				});
+		}
+	}
 }
