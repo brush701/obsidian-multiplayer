@@ -145,7 +145,6 @@ export class AuthManager implements IAuthManager {
 			code_challenge_method: "S256",
 			state: this._state,
 			scope: "openid profile email offline_access",
-			resource: "urn:tektite:api",
 		});
 
 		const authorizeUrl = `${this._settings.serverUrl}/auth/authorize?${params.toString()}`;

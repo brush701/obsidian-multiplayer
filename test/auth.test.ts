@@ -434,7 +434,10 @@ describe("AuthManager", () => {
 			expect(url.searchParams.get("scope")).toBe(
 				"openid profile email offline_access",
 			);
-			expect(url.searchParams.get("resource")).toBe("urn:tektite:api");
+			// resource is intentionally omitted from authorize so the initial
+			// token exchange returns an opaque token (for userinfo).
+			// JWT is obtained later via refresh with resource=urn:tektite:api.
+			expect(url.searchParams.get("resource")).toBeNull();
 			expect(url.searchParams.get("code_challenge")).toBeTruthy();
 			expect(url.searchParams.get("state")).toBeTruthy();
 
