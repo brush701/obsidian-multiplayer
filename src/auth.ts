@@ -189,10 +189,10 @@ export class AuthManager implements IAuthManager {
         this._shutdownCallbackServer()
       }, SIGN_IN_TIMEOUT_MS)
 
-      const createServer = this._deps.createServer ?? (() => {
+      const createServer = this._deps.createServer ?? ((handler: (req: IncomingMessage, res: ServerResponse) => void) => {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const http = require('http')
-        return http.createServer()
+        return http.createServer(handler)
       })
 
       const server = createServer((req: IncomingMessage, res: ServerResponse) => {
