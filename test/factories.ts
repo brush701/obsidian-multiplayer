@@ -10,6 +10,7 @@ import type {
   RoomMember,
   CreateRoomResult,
   JoinResult,
+  InviteResponse,
 } from '../src/types'
 
 // ── SharedTypeSettings ────────────────────────────────────────────────────────
@@ -102,6 +103,17 @@ export function makeJoinResult(
   return {
     guid: 'room-001',
     name: 'Test Room',
+    ...overrides,
+  }
+}
+
+// ── InviteResponse ───────────────────────────────────────────────────────────
+
+export function makeInviteResponse(
+  overrides: Partial<InviteResponse> = {}
+): InviteResponse {
+  return {
+    inviteUrl: 'https://example.com/join?token=invite-token-001',
     ...overrides,
   }
 }
