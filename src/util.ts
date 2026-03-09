@@ -68,8 +68,8 @@ export function loadBackup(filePath: string) {
                 if (path.includes("updates")) {
                     file.async('text').then(value => {
                         let bak = JSON.parse(value)
-                        let components = path.split("/")
-                        let guid = path[-2]
+                        const components = path.split("/")
+                        const guid = components[components.length - 2]
 
                         let req = window.indexedDB.open(guid)
 
