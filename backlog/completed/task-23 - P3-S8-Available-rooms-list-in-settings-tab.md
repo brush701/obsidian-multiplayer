@@ -1,10 +1,10 @@
 ---
 id: TASK-23
 title: '[P3-S8] Available rooms list in settings tab'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-09 03:17'
+updated_date: '2026-03-09 04:27'
 labels:
   - enhancement
   - 'epic: P3 - Room Management'
