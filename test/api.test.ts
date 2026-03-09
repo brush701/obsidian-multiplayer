@@ -28,7 +28,6 @@ function makeAuth(token: string | null = 'test-token'): IAuthManager {
     signOut: vi.fn(),
     signOutWithAuthError: vi.fn(),
     restoreSession: vi.fn(),
-    handleAuthCallback: vi.fn(),
     isAuthenticated: token !== null,
     hasAuthError: false,
     userInfo: null,

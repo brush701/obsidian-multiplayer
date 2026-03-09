@@ -1,9 +1,10 @@
 ---
 id: TASK-42
 title: Switch OAuth redirect to loopback HTTP server (RFC 8252 §7.3)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-03-08 23:48'
+updated_date: '2026-03-08 23:58'
 labels:
   - auth
   - enhancement
@@ -33,10 +34,10 @@ This also naturally solves the sign-in hang bug (TASK-19) since the HTTP server 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Plugin starts a temporary HTTP server on 127.0.0.1 with a random available port when sign-in begins
-- [ ] #2 redirect_uri is set to http://127.0.0.1:{port}/callback
-- [ ] #3 Auth code is received via the HTTP callback and exchanged for tokens
-- [ ] #4 Temporary HTTP server is shut down after receiving the callback or on timeout
-- [ ] #5 The obsidian:// protocol handler registration for auth callback is removed
-- [ ] #6 Sign-in flow works end-to-end with the server's OIDC provider
+- [x] #1 Plugin starts a temporary HTTP server on 127.0.0.1 with a random available port when sign-in begins
+- [x] #2 redirect_uri is set to http://127.0.0.1:{port}/callback
+- [x] #3 Auth code is received via the HTTP callback and exchanged for tokens
+- [x] #4 Temporary HTTP server is shut down after receiving the callback or on timeout
+- [x] #5 The obsidian:// protocol handler registration for auth callback is removed
+- [x] #6 Sign-in flow works end-to-end with the server's OIDC provider
 <!-- AC:END -->

@@ -2,13 +2,14 @@
 // Scope: Unit
 // Spec: TASK-8 — [P2-S1] AuthManager core + TASK-9 — [P2-S2] PKCE sign-in flow
 //        TASK-11 — [P2-S4] Silent token refresh + TASK-12 — [P2-S5] Sign-out
+//        TASK-42 — Loopback HTTP server for OAuth (RFC 8252 §7.3)
 // What this suite validates:
 //   - Fresh instance starts unauthenticated with null userInfo and null token
 //   - signOut() resets state and emits auth-changed
 //   - Event system: on() registers, off() removes, handlers called on emit
 //   - PKCE parameter generation (base64url, correct lengths)
-//   - signIn() opens browser with correct authorize URL
-//   - handleAuthCallback() bridges protocol handler to signIn() flow
+//   - signIn() starts loopback HTTP server and opens browser with correct authorize URL
+//   - Loopback server receives callback and bridges to signIn() flow
 //   - Token exchange and userInfo fetch on successful callback
 //   - State mismatch rejection
 //   - Non-2xx token response error handling
@@ -17,19 +18,80 @@
 //   - Silent token refresh when access token is near expiry
 //   - Concurrent refresh deduplication
 //   - Refresh failure triggers sign-out and notice
+//   - Sign-in times out after timeout period
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AuthManager } from '../src/auth'
+import type { AuthManagerDeps } from '../src/auth'
 import { App, Notice } from 'obsidian'
 import { TokenStore } from '../src/tokenStore'
 import { makeMultiplayerSettings } from './factories'
+import type { Server, IncomingMessage, ServerResponse } from 'http'
+import { EventEmitter } from 'events'
 
 const openExternalStub = vi.fn<[string], void>()
 
-function createAuthManager(serverUrl = 'https://example.com') {
+// Mock server that captures the request handler and allows simulating requests
+interface MockServer extends Server {
+  _handler: (req: IncomingMessage, res: ServerResponse) => void
+  _listenCallback: (() => void) | null
+  _port: number
+}
+
+function createMockServer(): {
+  server: MockServer
+  createServer: (handler: (req: IncomingMessage, res: ServerResponse) => void) => Server
+} {
+  let handler: (req: IncomingMessage, res: ServerResponse) => void
+  const emitter = new EventEmitter()
+  const server = Object.assign(emitter, {
+    _handler: null as unknown as (req: IncomingMessage, res: ServerResponse) => void,
+    _listenCallback: null as (() => void) | null,
+    _port: 0,
+    listen: vi.fn((port: number, host: string, cb: () => void) => {
+      server._port = port === 0 ? 54321 : port
+      server._listenCallback = cb
+      // Call listen callback asynchronously to mimic real server
+      Promise.resolve().then(() => cb())
+      return server
+    }),
+    close: vi.fn(() => {
+      return server
+    }),
+    address: vi.fn(() => ({ port: server._port || 54321, family: 'IPv4', address: '127.0.0.1' })),
+  }) as unknown as MockServer
+
+  const createServer = (h: (req: IncomingMessage, res: ServerResponse) => void) => {
+    handler = h
+    server._handler = h
+    return server as unknown as Server
+  }
+
+  return { server, createServer }
+}
+
+// Simulate an HTTP callback request to the mock server
+function simulateCallback(server: MockServer, path: string) {
+  const req = { url: path } as IncomingMessage
+  const res = {
+    writeHead: vi.fn(),
+    end: vi.fn(),
+  } as unknown as ServerResponse
+  server._handler(req, res)
+  return res
+}
+
+function createAuthManager(serverUrl = 'https://example.com', deps?: Partial<AuthManagerDeps>) {
   const app = new App()
   const settings = makeMultiplayerSettings({ serverUrl })
-  return new AuthManager(app, settings, { openUrl: openExternalStub })
+  const { server, createServer } = createMockServer()
+  const fullDeps: AuthManagerDeps = {
+    openUrl: openExternalStub,
+    createServer,
+    ...deps,
+  }
+  const auth = new AuthManager(app, settings, fullDeps)
+  return { auth, server }
 }
 
 // Helper: mock fetch to return token + userinfo responses
@@ -76,8 +138,8 @@ function mockFetchTokenFailure(status = 400) {
   })
 }
 
-// Helper: start signIn and wait for browser to open, return the authorize URL
-async function signInAndGetUrl(auth: AuthManager): Promise<URL> {
+// Helper: start signIn and wait for browser to open, return the authorize URL and server
+async function signInAndGetUrl(auth: ReturnType<typeof createAuthManager>['auth']): Promise<URL> {
   await vi.waitFor(() => {
     expect(openExternalStub).toHaveBeenCalled()
   })
@@ -95,17 +157,17 @@ describe('AuthManager', () => {
 
   describe('initial state', () => {
     it('isAuthenticated is false', () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       expect(auth.isAuthenticated).toBe(false)
     })
 
     it('userInfo is null', () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       expect(auth.userInfo).toBeNull()
     })
 
     it('getAccessToken() returns null', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const token = await auth.getAccessToken()
       expect(token).toBeNull()
     })
@@ -116,7 +178,8 @@ describe('AuthManager', () => {
     function createSignedInManager(serverUrl = 'https://example.com') {
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl })
-      const auth = new AuthManager(app, settings, { openUrl: openExternalStub })
+      const { createServer } = createMockServer()
+      const auth = new AuthManager(app, settings, { openUrl: openExternalStub, createServer })
       const tokenStore = new TokenStore(app)
 
       tokenStore.save({
@@ -205,7 +268,7 @@ describe('AuthManager', () => {
     it('does not send logout request when no access token exists', async () => {
       const fetchMock = vi.fn().mockResolvedValue({ ok: true })
       vi.stubGlobal('fetch', fetchMock)
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       await auth.signOut()
       expect(fetchMock).not.toHaveBeenCalled()
     })
@@ -213,7 +276,7 @@ describe('AuthManager', () => {
 
   describe('event system', () => {
     it('on() registers a handler that is called on emit', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
       await auth.signOut() // triggers emit
@@ -221,7 +284,7 @@ describe('AuthManager', () => {
     })
 
     it('supports multiple handlers', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const handler1 = vi.fn()
       const handler2 = vi.fn()
       auth.on('auth-changed', handler1)
@@ -232,7 +295,7 @@ describe('AuthManager', () => {
     })
 
     it('off() removes a handler so it is not called', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
       auth.off('auth-changed', handler)
@@ -241,7 +304,7 @@ describe('AuthManager', () => {
     })
 
     it('off() only removes the specified handler', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const handler1 = vi.fn()
       const handler2 = vi.fn()
       auth.on('auth-changed', handler1)
@@ -253,7 +316,7 @@ describe('AuthManager', () => {
     })
 
     it('adding the same handler twice only registers it once', async () => {
-      const auth = createAuthManager()
+      const { auth } = createAuthManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
       auth.on('auth-changed', handler)
@@ -262,25 +325,80 @@ describe('AuthManager', () => {
     })
   })
 
-  describe('signIn() — PKCE flow', () => {
-    it('opens browser with correct authorize URL', async () => {
+  describe('signIn() — loopback server PKCE flow', () => {
+    it('opens browser with correct authorize URL using loopback redirect', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager('https://auth.example.com')
+      const { auth, server } = createAuthManager('https://auth.example.com')
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
       expect(url.origin).toBe('https://auth.example.com')
       expect(url.pathname).toBe('/auth/authorize')
       expect(url.searchParams.get('client_id')).toBe('obsidian-multiplayer')
-      expect(url.searchParams.get('redirect_uri')).toBe('obsidian://multiplayer/callback')
+      expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:54321/callback')
       expect(url.searchParams.get('response_type')).toBe('code')
       expect(url.searchParams.get('code_challenge_method')).toBe('S256')
       expect(url.searchParams.get('scope')).toBe('openid profile email')
       expect(url.searchParams.get('code_challenge')).toBeTruthy()
       expect(url.searchParams.get('state')).toBeTruthy()
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
+      await signInPromise
+    })
+
+    it('starts loopback server on 127.0.0.1 with port 0 (random)', async () => {
+      vi.stubGlobal('fetch', mockFetchSuccess())
+
+      const { auth, server } = createAuthManager()
+      const signInPromise = auth.signIn()
+      const url = await signInAndGetUrl(auth)
+
+      expect(server.listen).toHaveBeenCalledWith(0, '127.0.0.1', expect.any(Function))
+
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
+      await signInPromise
+    })
+
+    it('shuts down loopback server after receiving callback', async () => {
+      vi.stubGlobal('fetch', mockFetchSuccess())
+
+      const { auth, server } = createAuthManager()
+      const signInPromise = auth.signIn()
+      const url = await signInAndGetUrl(auth)
+
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
+      await signInPromise
+
+      expect(server.close).toHaveBeenCalled()
+    })
+
+    it('responds with HTML success page to the browser callback', async () => {
+      vi.stubGlobal('fetch', mockFetchSuccess())
+
+      const { auth, server } = createAuthManager()
+      const signInPromise = auth.signIn()
+      const url = await signInAndGetUrl(auth)
+
+      const res = simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
+      await signInPromise
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'text/html' })
+      expect(res.end).toHaveBeenCalledWith(expect.stringContaining('Sign-in complete'))
+    })
+
+    it('returns 404 for non-callback paths', async () => {
+      vi.stubGlobal('fetch', mockFetchSuccess())
+
+      const { auth, server } = createAuthManager()
+      const signInPromise = auth.signIn()
+      const url = await signInAndGetUrl(auth)
+
+      const res = simulateCallback(server, '/some-other-path')
+      expect(res.writeHead).toHaveBeenCalledWith(404)
+
+      // Complete the flow so the promise resolves
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
     })
 
@@ -288,14 +406,14 @@ describe('AuthManager', () => {
       const fetchMock = mockFetchSuccess()
       vi.stubGlobal('fetch', fetchMock)
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
       const codeChallenge = url.searchParams.get('code_challenge')!
       const state = url.searchParams.get('state')!
 
-      auth.handleAuthCallback({ code: 'test-code', state })
+      simulateCallback(server, `/callback?code=test-code&state=${state}`)
       await signInPromise
 
       // Get the code_verifier from the token exchange request
@@ -315,15 +433,15 @@ describe('AuthManager', () => {
       expect(codeChallenge).toBe(expectedChallenge)
     })
 
-    it('sends correct token exchange request', async () => {
+    it('sends correct token exchange request with loopback redirect_uri', async () => {
       const fetchMock = mockFetchSuccess()
       vi.stubGlobal('fetch', fetchMock)
 
-      const auth = createAuthManager('https://auth.example.com')
+      const { auth, server } = createAuthManager('https://auth.example.com')
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'auth-code-123', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=auth-code-123&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       const tokenCall = fetchMock.mock.calls.find((c: string[]) => c[0].includes('/auth/token'))
@@ -335,18 +453,18 @@ describe('AuthManager', () => {
       expect(body.get('grant_type')).toBe('authorization_code')
       expect(body.get('code')).toBe('auth-code-123')
       expect(body.get('client_id')).toBe('obsidian-multiplayer')
-      expect(body.get('redirect_uri')).toBe('obsidian://multiplayer/callback')
+      expect(body.get('redirect_uri')).toBe('http://127.0.0.1:54321/callback')
       expect(body.get('code_verifier')).toBeTruthy()
     })
 
     it('sets isAuthenticated and userInfo after successful flow', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect(auth.isAuthenticated).toBe(true)
@@ -356,11 +474,11 @@ describe('AuthManager', () => {
     it('getAccessToken() returns token after successful sign-in', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       const token = await auth.getAccessToken()
@@ -370,14 +488,14 @@ describe('AuthManager', () => {
     it('emits auth-changed exactly once on success', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
 
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect(handler).toHaveBeenCalledTimes(1)
@@ -386,12 +504,12 @@ describe('AuthManager', () => {
     it('stays unauthenticated on state mismatch', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       await signInAndGetUrl(auth)
 
       // Send callback with wrong state
-      auth.handleAuthCallback({ code: 'test-code', state: 'wrong-state' })
+      simulateCallback(server, '/callback?code=test-code&state=wrong-state')
       await signInPromise
 
       expect(auth.isAuthenticated).toBe(false)
@@ -401,11 +519,11 @@ describe('AuthManager', () => {
     it('stays unauthenticated on non-2xx token response', async () => {
       vi.stubGlobal('fetch', mockFetchTokenFailure(400))
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect(auth.isAuthenticated).toBe(false)
@@ -415,11 +533,11 @@ describe('AuthManager', () => {
     it('stays unauthenticated on network error during token exchange', async () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect(auth.isAuthenticated).toBe(false)
@@ -429,7 +547,7 @@ describe('AuthManager', () => {
     it('second signIn() call returns the same promise', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const promise1 = auth.signIn()
       const promise2 = auth.signIn()
 
@@ -441,18 +559,18 @@ describe('AuthManager', () => {
       })
 
       const url = new URL(openExternalStub.mock.calls[0][0])
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await promise1
     })
 
     it('cleans up code_verifier and state after successful flow', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect((auth as Record<string, unknown>)['_codeVerifier']).toBeNull()
@@ -463,11 +581,11 @@ describe('AuthManager', () => {
     it('cleans up code_verifier and state after failed flow', async () => {
       vi.stubGlobal('fetch', mockFetchTokenFailure())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
-      auth.handleAuthCallback({ code: 'test-code', state: url.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=test-code&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect((auth as Record<string, unknown>)['_codeVerifier']).toBeNull()
@@ -478,12 +596,12 @@ describe('AuthManager', () => {
     it('can sign in again after a completed flow', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
 
       // First sign-in
       const signIn1 = auth.signIn()
       const url1 = await signInAndGetUrl(auth)
-      auth.handleAuthCallback({ code: 'code-1', state: url1.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=code-1&state=${url1.searchParams.get('state')!}`)
       await signIn1
       expect(auth.isAuthenticated).toBe(true)
 
@@ -493,31 +611,46 @@ describe('AuthManager', () => {
 
       const signIn2 = auth.signIn()
       const url2 = await signInAndGetUrl(auth)
-      auth.handleAuthCallback({ code: 'code-2', state: url2.searchParams.get('state')! })
+      simulateCallback(server, `/callback?code=code-2&state=${url2.searchParams.get('state')!}`)
       await signIn2
       expect(auth.isAuthenticated).toBe(true)
     })
-  })
 
-  describe('handleAuthCallback()', () => {
-    it('does not throw when no sign-in is in progress', () => {
-      const auth = createAuthManager()
-      expect(() => auth.handleAuthCallback({ code: 'test', state: 'test' })).not.toThrow()
-      expect(auth.isAuthenticated).toBe(false)
-    })
-
-    it('rejects sign-in when missing code', async () => {
+    it('stays unauthenticated when callback is missing code', async () => {
       vi.stubGlobal('fetch', mockFetchSuccess())
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
-      await signInAndGetUrl(auth)
+      const url = await signInAndGetUrl(auth)
 
       // Callback without code
-      auth.handleAuthCallback({ state: 'some-state' })
+      simulateCallback(server, `/callback?state=${url.searchParams.get('state')!}`)
       await signInPromise
 
       expect(auth.isAuthenticated).toBe(false)
+    })
+
+    it('times out and rejects if no callback is received', async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('fetch', mockFetchSuccess())
+
+      const { auth, server } = createAuthManager()
+      const signInPromise = auth.signIn()
+
+      // Wait for the server to start
+      await vi.waitFor(() => {
+        expect(openExternalStub).toHaveBeenCalled()
+      })
+
+      // Advance past the timeout
+      vi.advanceTimersByTime(120_001)
+
+      await signInPromise
+
+      expect(auth.isAuthenticated).toBe(false)
+      expect(server.close).toHaveBeenCalled()
+
+      vi.useRealTimers()
     })
   })
 
@@ -526,7 +659,8 @@ describe('AuthManager', () => {
     function createAuthenticatedManager(expiresInMs: number, serverUrl = 'https://example.com') {
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl })
-      const auth = new AuthManager(app, settings, { openUrl: openExternalStub })
+      const { createServer } = createMockServer()
+      const auth = new AuthManager(app, settings, { openUrl: openExternalStub, createServer })
       const tokenStore = new TokenStore(app)
 
       const expiresAt = new Date(Date.now() + expiresInMs).toISOString()
@@ -704,7 +838,8 @@ describe('AuthManager', () => {
 
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl: 'https://example.com' })
-      const auth = new AuthManager(app, settings, { openUrl: openExternalStub })
+      const { createServer } = createMockServer()
+      const auth = new AuthManager(app, settings, { openUrl: openExternalStub, createServer })
       const tokenStore = new TokenStore(app)
 
       // Store tokens that are already expired
@@ -728,7 +863,8 @@ describe('AuthManager', () => {
 
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl: 'https://example.com' })
-      const auth = new AuthManager(app, settings, { openUrl: openExternalStub })
+      const { createServer } = createMockServer()
+      const auth = new AuthManager(app, settings, { openUrl: openExternalStub, createServer })
       const tokenStore = new TokenStore(app)
 
       tokenStore.save({
@@ -751,7 +887,7 @@ describe('AuthManager', () => {
       const fetchMock = mockFetchSuccess()
       vi.stubGlobal('fetch', fetchMock)
 
-      const auth = createAuthManager()
+      const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
       const url = await signInAndGetUrl(auth)
 
@@ -762,7 +898,7 @@ describe('AuthManager', () => {
       expect(codeChallenge).not.toMatch(/[+/=]/)
       expect(state).not.toMatch(/[+/=]/)
 
-      auth.handleAuthCallback({ code: 'test-code', state })
+      simulateCallback(server, `/callback?code=test-code&state=${state}`)
       await signInPromise
 
       // Verify code_verifier from token request is base64url
