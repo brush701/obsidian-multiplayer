@@ -1,8 +1,9 @@
 import type { App } from 'obsidian'
-import { Notice } from 'obsidian'
+import { Notice, requestUrl } from 'obsidian'
 import type { MultiplayerSettings } from './types'
 import type { IAuthManager } from './types'
 import { TokenStore } from './tokenStore'
+import type { Server, IncomingMessage, ServerResponse } from 'http'
 
 type AuthEvent = 'auth-changed'
 
@@ -11,8 +12,11 @@ interface AuthCallbackParams {
   state: string
 }
 
+const SIGN_IN_TIMEOUT_MS = 120_000 // 2 minutes
+
 export interface AuthManagerDeps {
   openUrl: (url: string) => void
+  createServer?: (handler: (req: IncomingMessage, res: ServerResponse) => void) => Server
 }
 
 const defaultDeps: AuthManagerDeps = {
@@ -46,8 +50,8 @@ export class AuthManager implements IAuthManager {
   private _pendingSignIn: Promise<void> | null = null
   private _codeVerifier: string | null = null
   private _state: string | null = null
-  private _resolveCallback: ((params: AuthCallbackParams) => void) | null = null
-  private _rejectCallback: ((reason: Error) => void) | null = null
+  private _callbackServer: Server | null = null
+  private _callbackTimeout: ReturnType<typeof setTimeout> | null = null
 
   // In-memory cache of tokens (persisted via TokenStore)
   private _accessToken: string | null = null
@@ -115,16 +119,13 @@ export class AuthManager implements IAuthManager {
     this._state = this._generateState()
     const codeChallenge = await this._computeCodeChallenge(this._codeVerifier)
 
-    // Step 2: Create a promise that waits for the protocol handler callback
-    const callbackPromise = new Promise<AuthCallbackParams>((resolve, reject) => {
-      this._resolveCallback = resolve
-      this._rejectCallback = reject
-    })
+    // Step 2: Start loopback HTTP server and wait for callback (RFC 8252 §7.3)
+    const { callbackParams, redirectUri } = await this._startCallbackServer()
 
     // Step 3: Open browser to authorize endpoint
     const params = new URLSearchParams({
       client_id: 'obsidian-multiplayer',
-      redirect_uri: 'obsidian://multiplayer/callback',
+      redirect_uri: redirectUri,
       response_type: 'code',
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -137,16 +138,16 @@ export class AuthManager implements IAuthManager {
 
     // Step 4: Wait for callback, validate, and exchange
     try {
-      const callbackParams = await callbackPromise
+      const result = await callbackParams
 
       // Step 5: Validate state
-      if (callbackParams.state !== this._state) {
+      if (result.state !== this._state) {
         new Notice('Sign-in failed — invalid state parameter.')
         return
       }
 
       // Step 6: Exchange code for tokens
-      const tokenResponse = await this._exchangeCodeForTokens(callbackParams.code)
+      const tokenResponse = await this._exchangeCodeForTokens(result.code, redirectUri)
       this._accessToken = tokenResponse.access_token
 
       // Step 7: Fetch user info
@@ -171,22 +172,82 @@ export class AuthManager implements IAuthManager {
     }
   }
 
-  handleAuthCallback(params: Record<string, string>): void {
-    const code = params['code']
-    const state = params['state']
+  private _startCallbackServer(): Promise<{
+    callbackParams: Promise<AuthCallbackParams>
+    redirectUri: string
+  }> {
+    return new Promise((resolveSetup) => {
+      let resolveCallback: (params: AuthCallbackParams) => void
+      let rejectCallback: (reason: Error) => void
 
-    if (!this._resolveCallback) {
-      new Notice('No sign-in in progress.')
-      return
+      const callbackParams = new Promise<AuthCallbackParams>((resolve, reject) => {
+        resolveCallback = resolve
+        rejectCallback = reject
+      })
+
+      this._callbackTimeout = setTimeout(() => {
+        rejectCallback(new Error('Sign-in timed out'))
+        this._shutdownCallbackServer()
+      }, SIGN_IN_TIMEOUT_MS)
+
+      const createServer = this._deps.createServer ?? ((handler: (req: IncomingMessage, res: ServerResponse) => void) => {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const http = require('http')
+        return http.createServer(handler)
+      })
+
+      const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+        const url = new URL(req.url ?? '/', `http://127.0.0.1`)
+        if (url.pathname !== '/callback') {
+          res.writeHead(404)
+          res.end()
+          return
+        }
+
+        const code = url.searchParams.get('code')
+        const state = url.searchParams.get('state')
+
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end('<html><body><p>Sign-in complete. You can close this tab.</p></body></html>')
+
+        if (this._callbackTimeout) {
+          clearTimeout(this._callbackTimeout)
+          this._callbackTimeout = null
+        }
+
+        if (!code || !state) {
+          rejectCallback(new Error('Missing code or state'))
+        } else {
+          resolveCallback({ code, state })
+        }
+
+        this._shutdownCallbackServer()
+      })
+
+      this._callbackServer = server
+
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address()
+        const port = typeof address === 'object' && address ? address.port : 0
+        const redirectUri = `http://127.0.0.1:${port}/callback`
+        resolveSetup({ callbackParams, redirectUri })
+      })
+    })
+  }
+
+  private _shutdownCallbackServer(): void {
+    if (this._callbackTimeout) {
+      clearTimeout(this._callbackTimeout)
+      this._callbackTimeout = null
     }
-
-    if (!code || !state) {
-      new Notice('Sign-in failed — missing parameters.')
-      this._rejectCallback?.(new Error('Missing code or state'))
-      return
+    if (this._callbackServer) {
+      this._callbackServer.close()
+      this._callbackServer = null
     }
+  }
 
-    this._resolveCallback({ code, state })
+  destroy(): void {
+    this._cleanup()
   }
 
   async signOutWithAuthError(): Promise<void> {
@@ -197,8 +258,10 @@ export class AuthManager implements IAuthManager {
   async signOut(): Promise<void> {
     // Fire-and-forget server-side logout (best-effort, never blocks local sign-out)
     if (this._accessToken) {
-      fetch(`${this._settings.serverUrl}/auth/logout`, {
+      requestUrl({
+        url: `${this._settings.serverUrl}/auth/logout`,
         headers: { Authorization: `Bearer ${this._accessToken}` },
+        throw: false,
       }).catch(() => {})
     }
 
@@ -248,9 +311,8 @@ export class AuthManager implements IAuthManager {
   private _cleanup(): void {
     this._codeVerifier = null
     this._state = null
-    this._resolveCallback = null
-    this._rejectCallback = null
     this._pendingSignIn = null
+    this._shutdownCallbackServer()
   }
 
   private async _refreshTokens(refreshToken: string): Promise<string | null> {
@@ -261,13 +323,15 @@ export class AuthManager implements IAuthManager {
         client_id: 'obsidian-multiplayer',
       })
 
-      const response = await fetch(`${this._settings.serverUrl}/auth/token`, {
+      const response = await requestUrl({
+        url: `${this._settings.serverUrl}/auth/token`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        contentType: 'application/x-www-form-urlencoded',
         body: body.toString(),
+        throw: false,
       })
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         this._hasAuthError = true
         await this.signOut()
         new Notice('Session expired — please sign in again')
@@ -275,7 +339,7 @@ export class AuthManager implements IAuthManager {
       }
 
       const data: { access_token: string; refresh_token: string; expires_in: number } =
-        await response.json()
+        response.json
 
       const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString()
       this._tokenStore.save({
@@ -315,7 +379,7 @@ export class AuthManager implements IAuthManager {
     return base64urlEncode(new Uint8Array(hash))
   }
 
-  private async _exchangeCodeForTokens(code: string): Promise<{
+  private async _exchangeCodeForTokens(code: string, redirectUri: string): Promise<{
     access_token: string
     refresh_token: string
     token_type: string
@@ -330,20 +394,22 @@ export class AuthManager implements IAuthManager {
       code,
       code_verifier: this._codeVerifier,
       client_id: 'obsidian-multiplayer',
-      redirect_uri: 'obsidian://multiplayer/callback',
+      redirect_uri: redirectUri,
     })
 
-    const response = await fetch(`${this._settings.serverUrl}/auth/token`, {
+    const response = await requestUrl({
+      url: `${this._settings.serverUrl}/auth/token`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      contentType: 'application/x-www-form-urlencoded',
       body: body.toString(),
+      throw: false,
     })
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`Token exchange failed: ${response.status}`)
     }
 
-    return response.json()
+    return response.json
   }
 
   private async _fetchUserInfo(accessToken: string): Promise<{
@@ -351,14 +417,16 @@ export class AuthManager implements IAuthManager {
     email: string
     name: string
   }> {
-    const response = await fetch(`${this._settings.serverUrl}/auth/userinfo`, {
+    const response = await requestUrl({
+      url: `${this._settings.serverUrl}/auth/userinfo`,
       headers: { Authorization: `Bearer ${accessToken}` },
+      throw: false,
     })
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`UserInfo fetch failed: ${response.status}`)
     }
 
-    return response.json()
+    return response.json
   }
 }

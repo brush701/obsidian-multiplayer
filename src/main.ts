@@ -51,10 +51,6 @@ export default class Multiplayer extends Plugin {
   }
 
   setup() {
-    this.registerObsidianProtocolHandler('multiplayer/callback', (params) => {
-      this.authManager.handleAuthCallback(params as Record<string, string>)
-    })
-
     this.authManager.on('auth-changed', () => {
       if (!this.authManager.isAuthenticated) {
         this.sharedFolders.forEach(f => {
@@ -261,6 +257,7 @@ export default class Multiplayer extends Plugin {
   
 
   onunload() {
+    this.authManager.destroy()
     this.sharedFolders.forEach(sharedFolder => {
       this._detachStatusListeners(sharedFolder)
       sharedFolder.destroy()

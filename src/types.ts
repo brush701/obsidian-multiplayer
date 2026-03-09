@@ -111,7 +111,6 @@ export interface IAuthManager {
   signOutWithAuthError(): Promise<void>
   restoreSession(): Promise<void>
   getAccessToken(): Promise<string | null>
-  handleAuthCallback(params: Record<string, string>): void
   readonly isAuthenticated: boolean
   readonly hasAuthError: boolean
   readonly userInfo: { email: string; name: string } | null
