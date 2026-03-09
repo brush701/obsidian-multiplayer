@@ -300,6 +300,22 @@ export class SharedDoc {
 
 	setEditorView(view: EditorView): void {
 		this._editorView = view;
+		// Reconcile: role may have changed after binding was created
+		// but before EditorView was available. Reconfiguring to the
+		// current value is safe (idempotent in CodeMirror).
+		if (this._binding) {
+			const isViewer = this._role === "VIEWER";
+			view.dispatch({
+				effects: [
+					this._readOnlyCompartment.reconfigure(
+						EditorState.readOnly.of(isViewer),
+					),
+					this._panelCompartment.reconfigure(
+						isViewer ? showPanel.of(readOnlyPanel) : [],
+					),
+				],
+			});
+		}
 	}
 
 	setRole(role: RoomRole | null): void {

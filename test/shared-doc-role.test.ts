@@ -139,20 +139,64 @@ describe("SharedDoc role-based read-only", () => {
 		});
 	});
 
-	describe("dynamic role transition via setRole", () => {
-		it("dispatches reconfigure effects when role changes with an EditorView", () => {
+	describe("setEditorView reconciliation", () => {
+		it("dispatches current role state when EditorView is attached", () => {
 			const { doc } = makeSharedDoc(null);
 			doc.binding; // initialize binding
 
 			const mockView = makeMockEditorView();
 			doc.setEditorView(mockView as any);
 
+			// setEditorView dispatches to reconcile compartments
+			expect(mockView.dispatch).toHaveBeenCalledOnce();
+		});
+
+		it("reconciles VIEWER role that arrived before EditorView", () => {
+			// Simulates: binding created with null role, then role
+			// arrives via _fetchRole, then EditorView is attached.
+			const { doc } = makeSharedDoc(null);
+			doc.binding; // binding created with readOnly=false
+
+			// Role arrives but no EditorView yet — setRole stores but can't dispatch
+			doc.setRole("VIEWER");
+
+			const mockView = makeMockEditorView();
+			doc.setEditorView(mockView as any);
+
+			// setEditorView should reconcile to VIEWER (readOnly=true)
+			expect(mockView.dispatch).toHaveBeenCalledOnce();
+			const call = (mockView.dispatch as any).mock.calls[0][0];
+			expect(call.effects).toBeDefined();
+			expect(call.effects.length).toBe(2);
+			expect(doc.role).toBe("VIEWER");
+		});
+
+		it("does not dispatch when binding has not been created", () => {
+			const { doc } = makeSharedDoc(null);
+			// Don't access doc.binding
+
+			const mockView = makeMockEditorView();
+			doc.setEditorView(mockView as any);
+
+			expect(mockView.dispatch).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("dynamic role transition via setRole", () => {
+		it("dispatches reconfigure effects when role changes with an EditorView", () => {
+			const { doc } = makeSharedDoc(null);
+			doc.binding;
+
+			const mockView = makeMockEditorView();
+			doc.setEditorView(mockView as any);
+			(mockView.dispatch as any).mockClear();
+
 			doc.setRole("VIEWER");
 
 			expect(mockView.dispatch).toHaveBeenCalledOnce();
 			const call = (mockView.dispatch as any).mock.calls[0][0];
 			expect(call.effects).toBeDefined();
-			expect(call.effects.length).toBe(2); // readOnly + panel reconfigure
+			expect(call.effects.length).toBe(2);
 			expect(doc.role).toBe("VIEWER");
 		});
 
@@ -162,6 +206,7 @@ describe("SharedDoc role-based read-only", () => {
 
 			const mockView = makeMockEditorView();
 			doc.setEditorView(mockView as any);
+			(mockView.dispatch as any).mockClear();
 
 			doc.setRole("EDITOR");
 
@@ -175,6 +220,7 @@ describe("SharedDoc role-based read-only", () => {
 
 			const mockView = makeMockEditorView();
 			doc.setEditorView(mockView as any);
+			(mockView.dispatch as any).mockClear();
 
 			doc.setRole("EDITOR"); // same role
 			expect(mockView.dispatch).not.toHaveBeenCalled();
@@ -186,18 +232,6 @@ describe("SharedDoc role-based read-only", () => {
 
 			// No setEditorView call — should not throw
 			expect(() => doc.setRole("VIEWER")).not.toThrow();
-			expect(doc.role).toBe("VIEWER");
-		});
-
-		it("does not dispatch when binding has not been created", () => {
-			const { doc } = makeSharedDoc(null);
-			// Don't access doc.binding
-
-			const mockView = makeMockEditorView();
-			doc.setEditorView(mockView as any);
-
-			doc.setRole("VIEWER");
-			expect(mockView.dispatch).not.toHaveBeenCalled();
 			expect(doc.role).toBe("VIEWER");
 		});
 	});
