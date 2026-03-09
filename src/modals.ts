@@ -1,4 +1,4 @@
-import { Modal, TFolder, App, FileSystemAdapter, Notice } from "obsidian";
+import { Modal, FuzzySuggestModal, TFolder, App, FileSystemAdapter, Notice } from "obsidian";
 import  Multiplayer from "./main"
 import { SharedFolder } from "./sharedTypes";
 import { AuthRequiredError, ApiRequestError } from "./api";
@@ -267,12 +267,37 @@ export class UnshareFolderModal extends Modal {
         this.folder.destroy()
         this.close()
       })
-    } 
+    }
   }
 
   onClose() {
     const { contentEl } = this;
     contentEl.empty();
+  }
+}
+
+export class FolderSelectModal extends FuzzySuggestModal<TFolder> {
+  private folders: TFolder[];
+  private onSelect: (folder: TFolder) => void;
+
+  constructor(app: App, onSelect: (folder: TFolder) => void) {
+    super(app);
+    this.onSelect = onSelect;
+    this.folders = this.app.vault.getAllLoadedFiles()
+      .filter((f): f is TFolder => f instanceof TFolder) as TFolder[];
+    this.setPlaceholder('Select a folder to sync');
+  }
+
+  getItems(): TFolder[] {
+    return this.folders;
+  }
+
+  getItemText(folder: TFolder): string {
+    return folder.path || '/';
+  }
+
+  onChooseItem(folder: TFolder, _evt: MouseEvent | KeyboardEvent): void {
+    this.onSelect(folder);
   }
 }
 

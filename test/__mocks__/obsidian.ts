@@ -8,6 +8,7 @@ class DataAdapter {
 
 class Vault {
   adapter = new DataAdapter()
+  getAllLoadedFiles(): unknown[] { return [] }
 }
 
 export class App {
@@ -70,6 +71,19 @@ export class Modal {
   }
   open(): void {}
   close(): void {}
+}
+
+export class FuzzySuggestModal<T> {
+  app: App
+  constructor(app: App) {
+    this.app = app
+  }
+  setPlaceholder(_text: string): void {}
+  open(): void {}
+  close(): void {}
+  getItems(): T[] { return [] }
+  getItemText(_item: T): string { return '' }
+  onChooseItem(_item: T, _evt: MouseEvent | KeyboardEvent): void {}
 }
 
 export class Notice {
