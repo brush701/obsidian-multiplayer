@@ -4,7 +4,7 @@ title: Sign-in button hangs on failure — reset _signingIn state
 status: Done
 assignee: []
 created_date: '2026-03-08 23:48'
-updated_date: '2026-03-08 23:58'
+updated_date: '2026-03-09 04:49'
 labels:
   - bug
   - auth
@@ -13,6 +13,7 @@ references:
   - src/auth.ts
   - src/main.ts
 priority: medium
+ordinal: 11000
 ---
 
 ## Description

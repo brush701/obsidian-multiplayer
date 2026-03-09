@@ -4,7 +4,7 @@ title: '[P2-S7] Authentication UI in settings tab'
 status: Done
 assignee: []
 created_date: '2026-03-08 21:23'
-updated_date: '2026-03-08 21:43'
+updated_date: '2026-03-09 04:49'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -16,6 +16,7 @@ references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/47'
   - 'https://github.com/brush701/obsidian-multiplayer/pull/89'
 priority: medium
+ordinal: 12000
 ---
 
 ## Description

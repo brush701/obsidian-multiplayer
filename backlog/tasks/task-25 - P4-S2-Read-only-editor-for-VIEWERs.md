@@ -1,16 +1,17 @@
 ---
 id: TASK-25
 title: '[P4-S2] Read-only editor for VIEWERs'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-09 04:31'
+updated_date: '2026-03-09 04:49'
 labels:
   - enhancement
   - 'epic: P4 - Permissions'
 dependencies: []
 references:
   - 'https://github.com/brush701/obsidian-multiplayer/issues/58'
+ordinal: 500
 ---
 
 ## Description

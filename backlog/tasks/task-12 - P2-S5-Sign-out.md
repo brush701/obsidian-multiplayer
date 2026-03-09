@@ -4,7 +4,7 @@ title: '[P2-S5] Sign-out'
 status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-08 21:18'
+updated_date: '2026-03-09 04:49'
 labels:
   - enhancement
   - 'epic: P2 - Authentication'
@@ -14,6 +14,7 @@ references:
   - >-
     https://raw.githubusercontent.com/brush701/tektite-server/refs/heads/main/API.md
   - 'https://github.com/brush701/obsidian-multiplayer/pull/88'
+ordinal: 14000
 ---
 
 ## Description
