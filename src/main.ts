@@ -18,7 +18,6 @@ import { MultiplayerSettings, ConnectionStatus } from "./types";
 import { AuthManager } from "./auth";
 import { TektiteApiClient } from "./api";
 
-import { Compartment } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { around } from "monkey-around";
 import {
@@ -28,6 +27,7 @@ import {
 	MembersModal,
 	FolderSelectModal,
 } from "./modals";
+import { DocExtensionManager } from "./docExtensions";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
 	serverUrl: "",
@@ -42,7 +42,7 @@ export default class Multiplayer extends Plugin {
 	authManager: AuthManager;
 	apiClient: TektiteApiClient;
 	sharedFolders: SharedFolder[];
-	private _docCompartments: Map<string, Compartment> = new Map();
+	private _docExtensions = new DocExtensionManager();
 	private _iconStyleEl: HTMLStyleElement | null = null;
 	private _statusBarEl: HTMLElement | null = null;
 	private _statusChangeHandler = () => this._updateStatusBar();
@@ -68,7 +68,8 @@ export default class Multiplayer extends Plugin {
 					f.destroy();
 				});
 				this.sharedFolders = [];
-				this._reconfigureAllCompartments();
+				this._reconfigureAllEmpty();
+				this._docExtensions.clear();
 				this.app.workspace.updateOptions();
 				this.refreshIconStyles();
 			}
@@ -185,7 +186,11 @@ export default class Multiplayer extends Plugin {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (view) {
-						const compartment = this._getOrCreateCompartment(file.path);
+						const { compartment, isNew } =
+							this._docExtensions.getOrCreate(file.path);
+						if (isNew) {
+							this.registerEditorExtension(compartment.of([]));
+						}
 						sharedDoc.onceSynced().then(() => {
 							view.editor.setValue(sharedDoc.text);
 							// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,6 +227,7 @@ export default class Multiplayer extends Plugin {
 			const folder = this.getSharedFolder(oldPath);
 			if (folder) {
 				folder.renameDoc(file.path, oldPath);
+				this._docExtensions.rename(oldPath, file.path);
 			}
 		});
 
@@ -241,7 +247,16 @@ export default class Multiplayer extends Plugin {
 							);
 							console.log("disconnecting room", subdoc.path);
 							subdoc.close();
-							plugin._clearCompartment(file.path, this);
+							const effect =
+								plugin._docExtensions.emptyEffect(file.path);
+							if (effect) {
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								const cmView = (this.editor as any)
+									.cm as EditorView;
+								if (cmView) {
+									cmView.dispatch({ effects: effect });
+								}
+							}
 						} catch (e) {
 							console.log(e.message);
 						}
@@ -257,35 +272,13 @@ export default class Multiplayer extends Plugin {
 		this.refreshIconStyles();
 	}
 
-	private _getOrCreateCompartment(path: string): Compartment {
-		let compartment = this._docCompartments.get(path);
-		if (!compartment) {
-			compartment = new Compartment();
-			this._docCompartments.set(path, compartment);
-			this.registerEditorExtension(compartment.of([]));
-		}
-		return compartment;
-	}
-
-	_clearCompartment(path: string, markdownView: MarkdownView): void {
-		const compartment = this._docCompartments.get(path);
-		if (!compartment) return;
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const cmView = (markdownView.editor as any).cm as EditorView;
-		if (cmView) {
-			cmView.dispatch({
-				effects: compartment.reconfigure([]),
-			});
-		}
-	}
-
-	private _reconfigureAllCompartments(): void {
+	private _reconfigureAllEmpty(): void {
 		this.app.workspace.iterateAllLeaves((leaf) => {
 			if (leaf.view instanceof MarkdownView) {
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				const cmView = (leaf.view.editor as any).cm as EditorView;
 				if (cmView) {
-					for (const compartment of this._docCompartments.values()) {
+					for (const compartment of this._docExtensions.values()) {
 						cmView.dispatch({
 							effects: compartment.reconfigure([]),
 						});
