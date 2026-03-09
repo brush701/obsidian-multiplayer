@@ -2,6 +2,7 @@ import { Modal, FuzzySuggestModal, TFolder, App, FileSystemAdapter, Notice } fro
 import  Multiplayer from "./main"
 import { SharedFolder } from "./sharedTypes";
 import { AuthRequiredError, ApiRequestError } from "./api";
+import type { InviteExpiry } from "./types";
 
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
@@ -267,6 +268,119 @@ export class UnshareFolderModal extends Modal {
         this.folder.destroy()
         this.close()
       })
+    }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+export class InviteModal extends Modal {
+  plugin: Multiplayer;
+  private sharedFolder: SharedFolder;
+  private selectedRole: 'EDITOR' | 'VIEWER' = 'EDITOR';
+  private selectedExpiry: InviteExpiry = '7d';
+  private copyBtn: HTMLButtonElement;
+  private _generating = false;
+
+  constructor(app: App, plugin: Multiplayer, sharedFolder: SharedFolder) {
+    super(app);
+    this.plugin = plugin;
+    this.sharedFolder = sharedFolder;
+  }
+
+  onOpen() {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass('modal-style-multiplayer');
+    contentEl.empty();
+
+    contentEl.createEl('h2', { text: `Invite to "${this.sharedFolder.settings.name}"` });
+
+    // Role radio buttons
+    const roleLabel = contentEl.createEl('label', { text: 'Role' });
+    roleLabel.style.display = 'block';
+    roleLabel.style.marginBottom = '4px';
+    roleLabel.style.marginTop = '12px';
+
+    const roleContainer = contentEl.createDiv({ cls: 'multiplayer-role-container' });
+    roleContainer.style.display = 'flex';
+    roleContainer.style.gap = '16px';
+
+    const editorLabel = roleContainer.createEl('label');
+    const editorRadio = editorLabel.createEl('input', { type: 'radio', attr: { name: 'invite-role', value: 'EDITOR' } }) as HTMLInputElement;
+    editorRadio.checked = true;
+    editorLabel.appendText(' Editor');
+
+    const viewerLabel = roleContainer.createEl('label');
+    const viewerRadio = viewerLabel.createEl('input', { type: 'radio', attr: { name: 'invite-role', value: 'VIEWER' } }) as HTMLInputElement;
+    viewerLabel.appendText(' Viewer');
+
+    editorRadio.addEventListener('change', () => { if (editorRadio.checked) this.selectedRole = 'EDITOR' });
+    viewerRadio.addEventListener('change', () => { if (viewerRadio.checked) this.selectedRole = 'VIEWER' });
+
+    // Expiry dropdown
+    const expiryLabel = contentEl.createEl('label', { text: 'Expires' });
+    expiryLabel.style.display = 'block';
+    expiryLabel.style.marginBottom = '4px';
+    expiryLabel.style.marginTop = '12px';
+
+    const expirySelect = contentEl.createEl('select', { cls: 'multiplayer-expiry-select' }) as HTMLSelectElement;
+    expirySelect.style.width = '100%';
+
+    const options: { value: InviteExpiry; label: string }[] = [
+      { value: '1d', label: '1 day' },
+      { value: '7d', label: '7 days' },
+      { value: '30d', label: '30 days' },
+    ];
+
+    for (const opt of options) {
+      const optionEl = expirySelect.createEl('option', { text: opt.label, attr: { value: opt.value } });
+      if (opt.value === '7d') optionEl.selected = true;
+    }
+
+    expirySelect.addEventListener('change', () => { this.selectedExpiry = expirySelect.value as InviteExpiry });
+
+    // Copy button
+    const btnContainer = contentEl.createDiv();
+    btnContainer.style.marginTop = '12px';
+
+    this.copyBtn = btnContainer.createEl('button', {
+      text: 'Copy Invite Link',
+      cls: 'mod-cta',
+    });
+
+    this.copyBtn.onClickEvent(() => this.handleCopyInvite());
+  }
+
+  async handleCopyInvite() {
+    if (this._generating) return;
+
+    this._generating = true;
+    this.copyBtn.disabled = true;
+    this.copyBtn.textContent = 'Generating…';
+
+    try {
+      const result = await this.plugin.apiClient.createInvite(
+        this.sharedFolder.settings.guid,
+        this.selectedRole,
+        this.selectedExpiry,
+      );
+      await navigator.clipboard.writeText(result.inviteUrl);
+      new Notice('Invite link copied.');
+    } catch (e) {
+      if (e instanceof AuthRequiredError) {
+        new Notice('Sign in first.');
+      } else if (e instanceof ApiRequestError) {
+        new Notice(`Could not create invite: ${e.message}`);
+      } else {
+        new Notice('Could not create invite: unexpected error.');
+      }
+    } finally {
+      this._generating = false;
+      this.copyBtn.disabled = false;
+      this.copyBtn.textContent = 'Copy Invite Link';
     }
   }
 

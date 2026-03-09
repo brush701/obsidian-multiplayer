@@ -20,7 +20,7 @@ import { TektiteApiClient } from './api'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
-import { SharedFolderModal, UnshareFolderModal, FolderSelectModal } from "./modals";
+import { SharedFolderModal, UnshareFolderModal, InviteModal, FolderSelectModal } from "./modals";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   serverUrl: '',
@@ -76,6 +76,13 @@ export default class Multiplayer extends Plugin {
                   .setTitle('Delete Multiplayer Shared Folder')
                   .setIcon('dot-network')
                   .onClick(() => new UnshareFolderModal(this.app, this, folder).open());
+              })
+
+              menu.addItem((item) => {
+                item
+                  .setTitle(`Invite to ${folder.settings.name || 'Room'}`)
+                  .setIcon('user-plus')
+                  .onClick(() => new InviteModal(this.app, this, folder).open());
               })
 
               return true
