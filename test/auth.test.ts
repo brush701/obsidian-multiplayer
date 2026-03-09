@@ -574,30 +574,41 @@ describe("AuthManager", () => {
 			);
 			await signInPromise;
 
-			const tokenCall = requestUrlMock.mock.calls.find((c) =>
+			// First token call: exchange code WITHOUT resource (opaque token for userinfo)
+			const tokenCalls = requestUrlMock.mock.calls.filter((c) =>
 				(c[0] as { url: string }).url.includes("/auth/token"),
 			);
-			const params = tokenCall![0] as {
+			expect(tokenCalls.length).toBeGreaterThanOrEqual(2);
+
+			const exchangeParams = tokenCalls[0][0] as {
 				url: string;
 				method: string;
 				contentType: string;
 				body: string;
 			};
-			expect(params.url).toBe("https://auth.example.com/auth/token");
-			expect(params.method).toBe("POST");
-			expect(params.contentType).toBe(
+			expect(exchangeParams.url).toBe(
+				"https://auth.example.com/auth/token",
+			);
+			expect(exchangeParams.method).toBe("POST");
+			expect(exchangeParams.contentType).toBe(
 				"application/x-www-form-urlencoded",
 			);
 
-			const body = new URLSearchParams(params.body);
-			expect(body.get("grant_type")).toBe("authorization_code");
-			expect(body.get("code")).toBe("auth-code-123");
-			expect(body.get("client_id")).toBe("obsidian-multiplayer");
-			expect(body.get("redirect_uri")).toBe(
+			const exchangeBody = new URLSearchParams(exchangeParams.body);
+			expect(exchangeBody.get("grant_type")).toBe("authorization_code");
+			expect(exchangeBody.get("code")).toBe("auth-code-123");
+			expect(exchangeBody.get("client_id")).toBe("obsidian-multiplayer");
+			expect(exchangeBody.get("redirect_uri")).toBe(
 				"http://127.0.0.1:54321/callback",
 			);
-			expect(body.get("code_verifier")).toBeTruthy();
-			expect(body.get("resource")).toBe("urn:tektite:api");
+			expect(exchangeBody.get("code_verifier")).toBeTruthy();
+			expect(exchangeBody.get("resource")).toBeNull();
+
+			// Second token call: refresh WITH resource (JWT for API)
+			const refreshParams = tokenCalls[1][0] as { body: string };
+			const refreshBody = new URLSearchParams(refreshParams.body);
+			expect(refreshBody.get("grant_type")).toBe("refresh_token");
+			expect(refreshBody.get("resource")).toBe("urn:tektite:api");
 		});
 
 		it("sets isAuthenticated and userInfo after successful flow", async () => {

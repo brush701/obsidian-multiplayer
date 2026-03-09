@@ -162,29 +162,30 @@ export class AuthManager implements IAuthManager {
 			}
 
 			// Step 6: Exchange code for tokens
-			const tokenResponse = await this._exchangeCodeForTokens(
+			// First exchange WITHOUT resource → opaque token for userinfo
+			const opaqueResponse = await this._exchangeCodeForTokens(
 				result.code,
 				redirectUri,
+				false,
 			);
-			this._accessToken = tokenResponse.access_token;
 
-			// Step 7: Fetch user info
+			// Step 7: Fetch user info with opaque token
 			const userInfo = await this._fetchUserInfo(
-				tokenResponse.access_token,
+				opaqueResponse.access_token,
 			);
 			this._userInfo = { email: userInfo.email, name: userInfo.name };
 
-			// Step 8: Persist tokens to localStorage
-			const expiresAt = new Date(
-				Date.now() + tokenResponse.expires_in * 1000,
-			).toISOString();
-			this._tokenStore.save({
-				accessToken: tokenResponse.access_token,
-				refreshToken: tokenResponse.refresh_token,
-				expiresAt,
-				email: userInfo.email,
-				name: userInfo.name,
-			});
+			// Step 8: Refresh WITH resource → JWT for API calls
+			const jwtToken = await this._refreshTokens(
+				opaqueResponse.refresh_token,
+			);
+			if (!jwtToken) {
+				new Notice("Sign-in failed — could not obtain API token.");
+				return;
+			}
+
+			// Step 9: Persist tokens to localStorage
+			// (_refreshTokens already persisted and set _accessToken)
 
 			this._isAuthenticated = true;
 			this._hasAuthError = false;
@@ -424,6 +425,7 @@ export class AuthManager implements IAuthManager {
 	private async _exchangeCodeForTokens(
 		code: string,
 		redirectUri: string,
+		includeResource = true,
 	): Promise<{
 		access_token: string;
 		refresh_token: string;
@@ -440,8 +442,10 @@ export class AuthManager implements IAuthManager {
 			code_verifier: this._codeVerifier,
 			client_id: "obsidian-multiplayer",
 			redirect_uri: redirectUri,
-			resource: "urn:tektite:api",
 		});
+		if (includeResource) {
+			body.set("resource", "urn:tektite:api");
+		}
 
 		const response = await requestUrl({
 			url: `${this._settings.serverUrl}/auth/token`,
