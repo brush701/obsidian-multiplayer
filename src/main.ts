@@ -192,7 +192,8 @@ export default class Multiplayer extends Plugin {
 							view.editor.setValue(sharedDoc.text);
 							this.registerEditorExtension(extensions);
 							this.app.workspace.updateOptions();
-							const cmView = (view.editor as any).cm as EditorView;
+							const cmView = (view.editor as any)
+								.cm as EditorView;
 							if (cmView) sharedDoc.setEditorView(cmView);
 							console.log("binding yjs");
 						});
