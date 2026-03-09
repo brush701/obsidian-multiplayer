@@ -515,6 +515,8 @@ export class MembersModal extends Modal {
 				),
 			]);
 
+			this.sharedFolder.cachedRole = myRole.role;
+
 			this.bodyEl.empty();
 
 			const sorted = sortMembers(room.members);
