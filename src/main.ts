@@ -95,6 +95,8 @@ export default class Multiplayer extends Plugin {
 									);
 							});
 
+							menu.addSeparator();
+
 							if (folder.cachedRole !== "VIEWER") {
 								menu.addItem((item) => {
 									item.setTitle(
