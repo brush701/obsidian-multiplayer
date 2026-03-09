@@ -20,7 +20,7 @@ import { TektiteApiClient } from './api'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
-import { SharedFolderModal, UnshareFolderModal, InviteModal, FolderSelectModal } from "./modals";
+import { SharedFolderModal, UnshareFolderModal, InviteModal, MembersModal, FolderSelectModal } from "./modals";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   serverUrl: '',
@@ -85,6 +85,14 @@ export default class Multiplayer extends Plugin {
                   .onClick(() => new InviteModal(this.app, this, folder).open());
               })
 
+              menu.addItem((item) => {
+                item
+                  .setTitle('Room members')
+                  .setIcon('users')
+                  .onClick(() => new MembersModal(this.app, this, folder).open());
+              })
+
+
               return true
             }
           })
@@ -121,7 +129,7 @@ export default class Multiplayer extends Plugin {
       this.sharedFolders.push(newSharedFolder)
     })
     this._updateStatusBar()
-   
+
     var extensions = this._extensions
     this.app.workspace.on("file-open", file => {
       if (file) {
@@ -143,7 +151,7 @@ export default class Multiplayer extends Plugin {
       }
     })
 
-    this.app.vault.on("create", file => { 
+    this.app.vault.on("create", file => {
       let folder = this.getSharedFolder(file.path)
       if (folder) {
         folder.createDoc(file.path)
@@ -166,13 +174,13 @@ export default class Multiplayer extends Plugin {
     })
 
     const plugin = this
-    
+
     const patchOnUnloadFile = around(MarkdownView.prototype, {
       // replace MarkdownView.onLoadFile() with the following function
       onUnloadFile(old) { // old is the original onLoadFile function
         return function (file) { // onLoadFile takes one argument, file
 
-          const sharedFolder = plugin.getSharedFolder(file.path) 
+          const sharedFolder = plugin.getSharedFolder(file.path)
 
           if (sharedFolder) {
             try {
@@ -193,7 +201,7 @@ export default class Multiplayer extends Plugin {
 
     // register the patches with Obsidian's register method so that it gets unloaded properly
     this.register(patchOnUnloadFile);
-  
+
     this.refreshIconStyles();
   }
 
@@ -317,7 +325,7 @@ export default class Multiplayer extends Plugin {
 
   }
 
-  
+
 
   onunload() {
     this.authManager.destroy()

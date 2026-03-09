@@ -2,7 +2,7 @@ import { Modal, FuzzySuggestModal, TFolder, App, FileSystemAdapter, Notice } fro
 import  Multiplayer from "./main"
 import { SharedFolder } from "./sharedTypes";
 import { AuthRequiredError, ApiRequestError } from "./api";
-import type { InviteExpiry } from "./types";
+import type { InviteExpiry, RoomRole, RoomMember } from "./types";
 
 export class SharedFolderModal extends Modal {
   plugin: Multiplayer;
@@ -390,6 +390,120 @@ export class InviteModal extends Modal {
   }
 }
 
+const ROLE_ORDER: Record<RoomRole, number> = { OWNER: 0, EDITOR: 1, VIEWER: 2 };
+
+function sortMembers(members: RoomMember[]): RoomMember[] {
+  return [...members].sort((a, b) => {
+    const roleDiff = ROLE_ORDER[a.role] - ROLE_ORDER[b.role];
+    if (roleDiff !== 0) return roleDiff;
+    return a.email.localeCompare(b.email);
+  });
+}
+
+function formatRole(role: RoomRole): string {
+  return role.charAt(0) + role.slice(1).toLowerCase();
+}
+
+export class MembersModal extends Modal {
+  plugin: Multiplayer;
+  private sharedFolder: SharedFolder;
+  private bodyEl: HTMLElement;
+
+  constructor(app: App, plugin: Multiplayer, sharedFolder: SharedFolder) {
+    super(app);
+    this.plugin = plugin;
+    this.sharedFolder = sharedFolder;
+  }
+
+  onOpen() {
+    const { contentEl, modalEl } = this;
+    modalEl.addClass('modal-style-multiplayer');
+    contentEl.empty();
+
+    contentEl.createEl('h2', {
+      text: `${this.sharedFolder.settings.name || 'Room'} — Members`,
+    });
+
+    this.bodyEl = contentEl.createDiv({ cls: 'multiplayer-members-body' });
+    this.bodyEl.setText('Loading…');
+
+    this.loadMembers();
+  }
+
+  async loadMembers() {
+    try {
+      const [room, myRole] = await Promise.all([
+        this.plugin.apiClient.getRoom(this.sharedFolder.settings.guid),
+        this.plugin.apiClient.getMyRole(this.sharedFolder.settings.guid),
+      ]);
+
+      this.bodyEl.empty();
+
+      const sorted = sortMembers(room.members);
+      const listEl = this.bodyEl.createEl('div', { cls: 'multiplayer-members-list' });
+
+      for (const member of sorted) {
+        const row = listEl.createDiv({ cls: 'multiplayer-member-row' });
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.padding = '4px 0';
+
+        row.createSpan({ text: member.email, cls: 'multiplayer-member-email' });
+        row.createSpan({ text: formatRole(member.role), cls: 'multiplayer-member-role' });
+      }
+
+      // Action buttons
+      const actions = this.bodyEl.createDiv({ cls: 'multiplayer-members-actions' });
+      actions.style.marginTop = '16px';
+
+      // "Invite someone new" — hidden for VIEWERs
+      if (myRole.role !== 'VIEWER') {
+        const inviteBtn = actions.createEl('button', {
+          text: 'Invite someone new',
+          cls: 'mod-cta',
+        });
+        inviteBtn.style.marginRight = '8px';
+        inviteBtn.onClickEvent(() => {
+          this.close();
+          new InviteModal(this.app, this.plugin, this.sharedFolder).open();
+        });
+      }
+
+      // "Manage in admin panel"
+      const adminBtn = actions.createEl('button', {
+        text: 'Manage in admin panel ↗',
+      });
+      adminBtn.onClickEvent(() => {
+        const url = `${this.plugin.settings.serverUrl}/admin/rooms/${this.sharedFolder.settings.guid}`;
+        window.open(url);
+      });
+    } catch (e) {
+      this.bodyEl.empty();
+      if (e instanceof ApiRequestError) {
+        this.bodyEl.createEl('p', {
+          text: `Error: ${e.message}`,
+          cls: 'multiplayer-members-error',
+        });
+      } else if (e instanceof AuthRequiredError) {
+        this.bodyEl.createEl('p', {
+          text: 'Sign in to view members.',
+          cls: 'multiplayer-members-error',
+        });
+      } else {
+        this.bodyEl.createEl('p', {
+          text: 'Could not load members.',
+          cls: 'multiplayer-members-error',
+        });
+      }
+    }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
 export class FolderSelectModal extends FuzzySuggestModal<TFolder> {
   private folders: TFolder[];
   private onSelect: (folder: TFolder) => void;
@@ -414,4 +528,3 @@ export class FolderSelectModal extends FuzzySuggestModal<TFolder> {
     this.onSelect(folder);
   }
 }
-
