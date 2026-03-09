@@ -427,6 +427,12 @@ export class InviteModal extends Modal {
 			cls: "mod-cta",
 		});
 
+		// Defence-in-depth: disable for VIEWERs
+		if (this.sharedFolder.cachedRole === "VIEWER") {
+			this.copyBtn.disabled = true;
+			this.copyBtn.title = "Viewers cannot create invites";
+		}
+
 		this.copyBtn.onClickEvent(() => this.handleCopyInvite());
 	}
 

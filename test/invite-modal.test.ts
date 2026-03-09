@@ -183,6 +183,49 @@ describe('InviteModal', () => {
     })
   })
 
+  describe('role gating (defence-in-depth)', () => {
+    it('disables Copy Invite Link button when role is VIEWER', () => {
+      const app = new App()
+      const plugin = makePlugin()
+      const sharedFolder = { settings: { guid: 'room-abc', name: 'My Room', path: 'shared' }, cachedRole: 'VIEWER' } as any
+      const modal = new InviteModal(app as any, plugin as any, sharedFolder)
+
+      // Trigger onOpen to build the DOM
+      modal.onOpen()
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const btn = (modal as any).copyBtn as HTMLButtonElement
+      expect(btn.disabled).toBe(true)
+      expect(btn.title).toBe('Viewers cannot create invites')
+    })
+
+    it('does not disable Copy Invite Link button when role is EDITOR', () => {
+      const app = new App()
+      const plugin = makePlugin()
+      const sharedFolder = { settings: { guid: 'room-abc', name: 'My Room', path: 'shared' }, cachedRole: 'EDITOR' } as any
+      const modal = new InviteModal(app as any, plugin as any, sharedFolder)
+
+      modal.onOpen()
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const btn = (modal as any).copyBtn as HTMLButtonElement
+      expect(btn.disabled).toBeFalsy()
+    })
+
+    it('does not disable Copy Invite Link button when role is null', () => {
+      const app = new App()
+      const plugin = makePlugin()
+      const sharedFolder = { settings: { guid: 'room-abc', name: 'My Room', path: 'shared' }, cachedRole: null } as any
+      const modal = new InviteModal(app as any, plugin as any, sharedFolder)
+
+      modal.onOpen()
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const btn = (modal as any).copyBtn as HTMLButtonElement
+      expect(btn.disabled).toBeFalsy()
+    })
+  })
+
   describe('double-click guard', () => {
     it('ignores second call while first is in flight', async () => {
       let resolveCreate!: (v: unknown) => void
