@@ -257,6 +257,7 @@ export default class Multiplayer extends Plugin {
   
 
   onunload() {
+    this.authManager.destroy()
     this.sharedFolders.forEach(sharedFolder => {
       this._detachStatusListeners(sharedFolder)
       sharedFolder.destroy()

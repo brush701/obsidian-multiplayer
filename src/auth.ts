@@ -1,4 +1,4 @@
-import type { App, RequestUrlParam } from 'obsidian'
+import type { App } from 'obsidian'
 import { Notice, requestUrl } from 'obsidian'
 import type { MultiplayerSettings } from './types'
 import type { IAuthManager } from './types'
@@ -51,6 +51,7 @@ export class AuthManager implements IAuthManager {
   private _codeVerifier: string | null = null
   private _state: string | null = null
   private _callbackServer: Server | null = null
+  private _callbackTimeout: ReturnType<typeof setTimeout> | null = null
 
   // In-memory cache of tokens (persisted via TokenStore)
   private _accessToken: string | null = null
@@ -184,7 +185,7 @@ export class AuthManager implements IAuthManager {
         rejectCallback = reject
       })
 
-      const timeout = setTimeout(() => {
+      this._callbackTimeout = setTimeout(() => {
         rejectCallback(new Error('Sign-in timed out'))
         this._shutdownCallbackServer()
       }, SIGN_IN_TIMEOUT_MS)
@@ -209,7 +210,10 @@ export class AuthManager implements IAuthManager {
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end('<html><body><p>Sign-in complete. You can close this tab.</p></body></html>')
 
-        clearTimeout(timeout)
+        if (this._callbackTimeout) {
+          clearTimeout(this._callbackTimeout)
+          this._callbackTimeout = null
+        }
 
         if (!code || !state) {
           rejectCallback(new Error('Missing code or state'))
@@ -232,10 +236,18 @@ export class AuthManager implements IAuthManager {
   }
 
   private _shutdownCallbackServer(): void {
+    if (this._callbackTimeout) {
+      clearTimeout(this._callbackTimeout)
+      this._callbackTimeout = null
+    }
     if (this._callbackServer) {
       this._callbackServer.close()
       this._callbackServer = null
     }
+  }
+
+  destroy(): void {
+    this._cleanup()
   }
 
   async signOutWithAuthError(): Promise<void> {
