@@ -95,18 +95,29 @@ export class ButtonComponent {
 	}
 }
 
+function mockEl(): Record<string, unknown> {
+	const el: Record<string, unknown> = {
+		style: {} as Record<string, string>,
+		empty: () => {},
+		createEl: (_tag: string, _opts?: unknown) => mockEl(),
+		createDiv: (_opts?: unknown) => mockEl(),
+		addClass: () => {},
+		appendText: () => {},
+		addEventListener: () => {},
+		onClickEvent: () => {},
+		createSpan: (_opts?: unknown) => mockEl(),
+	};
+	return el;
+}
+
 export class Modal {
 	app: App;
 	contentEl: HTMLElement;
 	modalEl: HTMLElement;
 	constructor(app: App) {
 		this.app = app;
-		this.contentEl = {
-			empty: () => {},
-			createEl: () => ({}),
-			createDiv: () => ({}),
-		} as unknown as HTMLElement;
-		this.modalEl = { addClass: () => {} } as unknown as HTMLElement;
+		this.contentEl = mockEl() as unknown as HTMLElement;
+		this.modalEl = mockEl() as unknown as HTMLElement;
 	}
 	open(): void {}
 	close(): void {}
