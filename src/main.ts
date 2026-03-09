@@ -415,6 +415,7 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 	private _availableRoomsEl: HTMLElement | null = null;
 	private _authChangedHandler: (() => void) | null = null;
 	private _signingIn = false;
+	private _loadGeneration = 0;
 
 	constructor(app: App, plugin: Multiplayer) {
 		super(app, plugin);
@@ -520,6 +521,7 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 	private _renderAvailableRooms(): void {
 		if (!this._availableRoomsEl) return;
 		this._availableRoomsEl.empty();
+		this._loadGeneration++;
 
 		this._availableRoomsEl.createEl("h3", { text: "Available rooms" });
 
@@ -530,16 +532,19 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 			return;
 		}
 
-		const statusEl = this._availableRoomsEl.createEl("p", {
+		this._availableRoomsEl.createEl("p", {
 			text: "Loading rooms…",
 		});
 
-		this._loadAvailableRooms(statusEl);
+		this._loadAvailableRooms(this._loadGeneration);
 	}
 
-	private async _loadAvailableRooms(statusEl: HTMLElement): Promise<void> {
+	private async _loadAvailableRooms(generation: number): Promise<void> {
 		try {
 			const rooms = await this.plugin.apiClient.listRooms();
+
+			if (generation !== this._loadGeneration) return;
+
 			const existingGuids = new Set(
 				this.plugin.settings.sharedFolders.map((sf) => sf.guid),
 			);
@@ -547,7 +552,10 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 				(r) => !existingGuids.has(r.guid),
 			);
 
-			statusEl.remove();
+			this._availableRoomsEl!.empty();
+			this._availableRoomsEl!.createEl("h3", {
+				text: "Available rooms",
+			});
 
 			if (available.length === 0) {
 				this._availableRoomsEl!.createEl("p", {
@@ -559,7 +567,10 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 			for (const room of available) {
 				new Setting(this._availableRoomsEl!)
 					.setName(room.name)
-					.setDesc(room.role.charAt(0) + room.role.slice(1).toLowerCase())
+					.setDesc(
+						room.role.charAt(0) +
+							room.role.slice(1).toLowerCase(),
+					)
 					.addButton((btn) => {
 						btn.setButtonText("Add to vault").onClick(() => {
 							new FolderSelectModal(
@@ -610,7 +621,15 @@ export class MultiplayerSettingTab extends PluginSettingTab {
 					});
 			}
 		} catch {
-			statusEl.setText("Could not load rooms.");
+			if (generation !== this._loadGeneration) return;
+
+			this._availableRoomsEl!.empty();
+			this._availableRoomsEl!.createEl("h3", {
+				text: "Available rooms",
+			});
+			this._availableRoomsEl!.createEl("p", {
+				text: "Could not load rooms.",
+			});
 		}
 	}
 }
