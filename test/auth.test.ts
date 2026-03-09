@@ -23,13 +23,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AuthManager } from '../src/auth'
 import type { AuthManagerDeps } from '../src/auth'
-import { App, Notice } from 'obsidian'
+import { App, Notice, requestUrl } from 'obsidian'
 import { TokenStore } from '../src/tokenStore'
 import { makeMultiplayerSettings } from './factories'
 import type { Server, IncomingMessage, ServerResponse } from 'http'
 import { EventEmitter } from 'events'
 
 const openExternalStub = vi.fn<[string], void>()
+const requestUrlMock = vi.mocked(requestUrl)
 
 // Mock server that captures the request handler and allows simulating requests
 interface MockServer extends Server {
@@ -42,13 +43,12 @@ function createMockServer(): {
   server: MockServer
   createServer: (handler: (req: IncomingMessage, res: ServerResponse) => void) => Server
 } {
-  let handler: (req: IncomingMessage, res: ServerResponse) => void
   const emitter = new EventEmitter()
   const server = Object.assign(emitter, {
     _handler: null as unknown as (req: IncomingMessage, res: ServerResponse) => void,
     _listenCallback: null as (() => void) | null,
     _port: 0,
-    listen: vi.fn((port: number, host: string, cb: () => void) => {
+    listen: vi.fn((port: number, _host: string, cb: () => void) => {
       server._port = port === 0 ? 54321 : port
       server._listenCallback = cb
       // Call listen callback asynchronously to mimic real server
@@ -62,7 +62,6 @@ function createMockServer(): {
   }) as unknown as MockServer
 
   const createServer = (h: (req: IncomingMessage, res: ServerResponse) => void) => {
-    handler = h
     server._handler = h
     return server as unknown as Server
   }
@@ -94,8 +93,8 @@ function createAuthManager(serverUrl = 'https://example.com', deps?: Partial<Aut
   return { auth, server }
 }
 
-// Helper: mock fetch to return token + userinfo responses
-function mockFetchSuccess(
+// Helper: mock requestUrl to return token + userinfo responses
+function mockRequestUrlSuccess(
   tokenResponse = {
     access_token: 'test-access-token',
     refresh_token: 'test-refresh-token',
@@ -108,37 +107,38 @@ function mockFetchSuccess(
     name: 'Alice Chen',
   }
 ) {
-  return vi.fn((url: string) => {
-    if (url.includes('/auth/token')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(tokenResponse),
-      })
+  requestUrlMock.mockImplementation((params: { url: string }) => {
+    if (params.url.includes('/auth/token')) {
+      return Promise.resolve({ status: 200, json: tokenResponse, headers: {}, text: '' } as never)
     }
-    if (url.includes('/auth/userinfo')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(userInfoResponse),
-      })
+    if (params.url.includes('/auth/userinfo')) {
+      return Promise.resolve({ status: 200, json: userInfoResponse, headers: {}, text: '' } as never)
     }
-    return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+    if (params.url.includes('/auth/logout')) {
+      return Promise.resolve({ status: 200, json: {}, headers: {}, text: '' } as never)
+    }
+    return Promise.reject(new Error(`Unexpected requestUrl: ${params.url}`))
   })
 }
 
-function mockFetchTokenFailure(status = 400) {
-  return vi.fn((url: string) => {
-    if (url.includes('/auth/token')) {
+function mockRequestUrlTokenFailure(status = 400) {
+  requestUrlMock.mockImplementation((params: { url: string }) => {
+    if (params.url.includes('/auth/token')) {
       return Promise.resolve({
-        ok: false,
         status,
-        json: () => Promise.resolve({ error: 'invalid_grant', error_description: 'bad code' }),
-      })
+        json: { error: 'invalid_grant', error_description: 'bad code' },
+        headers: {},
+        text: '',
+      } as never)
     }
-    return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+    if (params.url.includes('/auth/logout')) {
+      return Promise.resolve({ status: 200, json: {}, headers: {}, text: '' } as never)
+    }
+    return Promise.reject(new Error(`Unexpected requestUrl: ${params.url}`))
   })
 }
 
-// Helper: start signIn and wait for browser to open, return the authorize URL and server
+// Helper: start signIn and wait for browser to open, return the authorize URL
 async function signInAndGetUrl(auth: ReturnType<typeof createAuthManager>['auth']): Promise<URL> {
   await vi.waitFor(() => {
     expect(openExternalStub).toHaveBeenCalled()
@@ -149,6 +149,7 @@ async function signInAndGetUrl(auth: ReturnType<typeof createAuthManager>['auth'
 describe('AuthManager', () => {
   beforeEach(() => {
     openExternalStub.mockClear()
+    requestUrlMock.mockReset()
   })
 
   afterEach(() => {
@@ -200,7 +201,7 @@ describe('AuthManager', () => {
     }
 
     it('sets isAuthenticated to false', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createSignedInManager()
       expect(auth.isAuthenticated).toBe(true)
       await auth.signOut()
@@ -208,7 +209,7 @@ describe('AuthManager', () => {
     })
 
     it('sets userInfo to null', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createSignedInManager()
       expect(auth.userInfo).not.toBeNull()
       await auth.signOut()
@@ -216,7 +217,7 @@ describe('AuthManager', () => {
     })
 
     it('getAccessToken() returns null after signOut', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createSignedInManager()
       await auth.signOut()
       const token = await auth.getAccessToken()
@@ -224,7 +225,7 @@ describe('AuthManager', () => {
     })
 
     it('TokenStore.load() returns null after signOut', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth, tokenStore } = createSignedInManager()
       expect(tokenStore.load()).not.toBeNull()
       await auth.signOut()
@@ -232,7 +233,7 @@ describe('AuthManager', () => {
     })
 
     it('emits auth-changed exactly once', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createSignedInManager()
       const handler = vi.fn()
       auth.on('auth-changed', handler)
@@ -241,7 +242,7 @@ describe('AuthManager', () => {
     })
 
     it('completes even when the logout endpoint fails', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+      requestUrlMock.mockRejectedValue(new Error('Network error'))
       const { auth, tokenStore } = createSignedInManager()
       await auth.signOut()
       expect(auth.isAuthenticated).toBe(false)
@@ -249,28 +250,27 @@ describe('AuthManager', () => {
       expect(tokenStore.load()).toBeNull()
     })
 
-    it('sends fire-and-forget GET /auth/logout with Bearer token', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-      vi.stubGlobal('fetch', fetchMock)
+    it('sends fire-and-forget /auth/logout with Bearer token', async () => {
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createSignedInManager('https://auth.example.com')
       await auth.signOut()
 
-      const logoutCall = fetchMock.mock.calls.find(
-        (c: [string, RequestInit?]) => c[0].includes('/auth/logout')
+      const logoutCall = requestUrlMock.mock.calls.find(
+        (c) => (c[0] as { url: string }).url.includes('/auth/logout')
       )
       expect(logoutCall).toBeDefined()
-      expect(logoutCall![0]).toBe('https://auth.example.com/auth/logout')
-      expect(logoutCall![1].headers).toEqual({
+      const params = logoutCall![0] as { url: string; headers: Record<string, string> }
+      expect(params.url).toBe('https://auth.example.com/auth/logout')
+      expect(params.headers).toEqual({
         Authorization: 'Bearer test-access-token',
       })
     })
 
     it('does not send logout request when no access token exists', async () => {
-      const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-      vi.stubGlobal('fetch', fetchMock)
+      requestUrlMock.mockResolvedValue({ status: 200, json: {}, headers: {}, text: '' } as never)
       const { auth } = createAuthManager()
       await auth.signOut()
-      expect(fetchMock).not.toHaveBeenCalled()
+      expect(requestUrlMock).not.toHaveBeenCalled()
     })
   })
 
@@ -327,7 +327,7 @@ describe('AuthManager', () => {
 
   describe('signIn() — loopback server PKCE flow', () => {
     it('opens browser with correct authorize URL using loopback redirect', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager('https://auth.example.com')
       const signInPromise = auth.signIn()
@@ -348,7 +348,7 @@ describe('AuthManager', () => {
     })
 
     it('starts loopback server on 127.0.0.1 with port 0 (random)', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -361,7 +361,7 @@ describe('AuthManager', () => {
     })
 
     it('shuts down loopback server after receiving callback', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -374,7 +374,7 @@ describe('AuthManager', () => {
     })
 
     it('responds with HTML success page to the browser callback', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -388,7 +388,7 @@ describe('AuthManager', () => {
     })
 
     it('returns 404 for non-callback paths', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -403,8 +403,7 @@ describe('AuthManager', () => {
     })
 
     it('code_challenge is base64url SHA-256 of code_verifier', async () => {
-      const fetchMock = mockFetchSuccess()
-      vi.stubGlobal('fetch', fetchMock)
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -417,8 +416,11 @@ describe('AuthManager', () => {
       await signInPromise
 
       // Get the code_verifier from the token exchange request
-      const tokenCall = fetchMock.mock.calls.find((c: string[]) => c[0].includes('/auth/token'))
-      const body = new URLSearchParams(tokenCall![1].body)
+      const tokenCall = requestUrlMock.mock.calls.find(
+        (c) => (c[0] as { url: string }).url.includes('/auth/token')
+      )
+      const params = tokenCall![0] as { body: string }
+      const body = new URLSearchParams(params.body)
       const codeVerifier = body.get('code_verifier')!
 
       // Recompute challenge from verifier and compare
@@ -434,8 +436,7 @@ describe('AuthManager', () => {
     })
 
     it('sends correct token exchange request with loopback redirect_uri', async () => {
-      const fetchMock = mockFetchSuccess()
-      vi.stubGlobal('fetch', fetchMock)
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager('https://auth.example.com')
       const signInPromise = auth.signIn()
@@ -444,12 +445,15 @@ describe('AuthManager', () => {
       simulateCallback(server, `/callback?code=auth-code-123&state=${url.searchParams.get('state')!}`)
       await signInPromise
 
-      const tokenCall = fetchMock.mock.calls.find((c: string[]) => c[0].includes('/auth/token'))
-      expect(tokenCall![0]).toBe('https://auth.example.com/auth/token')
-      expect(tokenCall![1].method).toBe('POST')
-      expect(tokenCall![1].headers['Content-Type']).toBe('application/x-www-form-urlencoded')
+      const tokenCall = requestUrlMock.mock.calls.find(
+        (c) => (c[0] as { url: string }).url.includes('/auth/token')
+      )
+      const params = tokenCall![0] as { url: string; method: string; contentType: string; body: string }
+      expect(params.url).toBe('https://auth.example.com/auth/token')
+      expect(params.method).toBe('POST')
+      expect(params.contentType).toBe('application/x-www-form-urlencoded')
 
-      const body = new URLSearchParams(tokenCall![1].body)
+      const body = new URLSearchParams(params.body)
       expect(body.get('grant_type')).toBe('authorization_code')
       expect(body.get('code')).toBe('auth-code-123')
       expect(body.get('client_id')).toBe('obsidian-multiplayer')
@@ -458,7 +462,7 @@ describe('AuthManager', () => {
     })
 
     it('sets isAuthenticated and userInfo after successful flow', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -472,7 +476,7 @@ describe('AuthManager', () => {
     })
 
     it('getAccessToken() returns token after successful sign-in', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -486,7 +490,7 @@ describe('AuthManager', () => {
     })
 
     it('emits auth-changed exactly once on success', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const handler = vi.fn()
@@ -502,7 +506,7 @@ describe('AuthManager', () => {
     })
 
     it('stays unauthenticated on state mismatch', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -517,7 +521,7 @@ describe('AuthManager', () => {
     })
 
     it('stays unauthenticated on non-2xx token response', async () => {
-      vi.stubGlobal('fetch', mockFetchTokenFailure(400))
+      mockRequestUrlTokenFailure(400)
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -531,7 +535,7 @@ describe('AuthManager', () => {
     })
 
     it('stays unauthenticated on network error during token exchange', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+      requestUrlMock.mockRejectedValue(new Error('Network error'))
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -545,7 +549,7 @@ describe('AuthManager', () => {
     })
 
     it('second signIn() call returns the same promise', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const promise1 = auth.signIn()
@@ -564,7 +568,7 @@ describe('AuthManager', () => {
     })
 
     it('cleans up code_verifier and state after successful flow', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -579,7 +583,7 @@ describe('AuthManager', () => {
     })
 
     it('cleans up code_verifier and state after failed flow', async () => {
-      vi.stubGlobal('fetch', mockFetchTokenFailure())
+      mockRequestUrlTokenFailure()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -594,7 +598,7 @@ describe('AuthManager', () => {
     })
 
     it('can sign in again after a completed flow', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
 
@@ -617,7 +621,7 @@ describe('AuthManager', () => {
     })
 
     it('stays unauthenticated when callback is missing code', async () => {
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -632,7 +636,7 @@ describe('AuthManager', () => {
 
     it('times out and rejects if no callback is received', async () => {
       vi.useFakeTimers()
-      vi.stubGlobal('fetch', mockFetchSuccess())
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -686,72 +690,75 @@ describe('AuthManager', () => {
       newAccessToken = 'refreshed-access-token',
       newRefreshToken = 'refreshed-refresh-token'
     ) {
-      return vi.fn((url: string) => {
-        if (url.includes('/auth/token')) {
+      requestUrlMock.mockImplementation((params: { url: string }) => {
+        if (params.url.includes('/auth/token')) {
           return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                access_token: newAccessToken,
-                refresh_token: newRefreshToken,
-                token_type: 'Bearer',
-                expires_in: 3600,
-              }),
-          })
+            status: 200,
+            json: {
+              access_token: newAccessToken,
+              refresh_token: newRefreshToken,
+              token_type: 'Bearer',
+              expires_in: 3600,
+            },
+            headers: {},
+            text: '',
+          } as never)
         }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+        if (params.url.includes('/auth/logout')) {
+          return Promise.resolve({ status: 200, json: {}, headers: {}, text: '' } as never)
+        }
+        return Promise.reject(new Error(`Unexpected requestUrl: ${params.url}`))
       })
     }
 
     function mockRefreshFailure(status = 401) {
-      return vi.fn((url: string) => {
-        if (url.includes('/auth/token')) {
+      requestUrlMock.mockImplementation((params: { url: string }) => {
+        if (params.url.includes('/auth/token')) {
           return Promise.resolve({
-            ok: false,
             status,
-            json: () =>
-              Promise.resolve({ error: 'invalid_grant', error_description: 'token revoked' }),
-          })
+            json: { error: 'invalid_grant', error_description: 'token revoked' },
+            headers: {},
+            text: '',
+          } as never)
         }
-        return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+        if (params.url.includes('/auth/logout')) {
+          return Promise.resolve({ status: 200, json: {}, headers: {}, text: '' } as never)
+        }
+        return Promise.reject(new Error(`Unexpected requestUrl: ${params.url}`))
       })
     }
 
     it('returns stored token without network request when expiry > 60s away', async () => {
-      const fetchMock = vi.fn()
-      vi.stubGlobal('fetch', fetchMock)
-
       const { auth } = createAuthenticatedManager(120_000) // 120s in future
 
       const token = await auth.getAccessToken()
 
       expect(token).toBe('original-access-token')
-      expect(fetchMock).not.toHaveBeenCalled()
+      expect(requestUrlMock).not.toHaveBeenCalled()
     })
 
     it('sends refresh POST when token expiry is within 60s', async () => {
-      const fetchMock = mockRefreshSuccess()
-      vi.stubGlobal('fetch', fetchMock)
+      mockRefreshSuccess()
 
       const { auth } = createAuthenticatedManager(30_000) // 30s in future
 
       const token = await auth.getAccessToken()
 
       expect(token).toBe('refreshed-access-token')
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(requestUrlMock).toHaveBeenCalledTimes(1)
 
-      const [url, opts] = fetchMock.mock.calls[0]
-      expect(url).toBe('https://example.com/auth/token')
-      expect(opts.method).toBe('POST')
+      const params = requestUrlMock.mock.calls[0][0] as { url: string; method: string; body: string }
+      expect(params.url).toBe('https://example.com/auth/token')
+      expect(params.method).toBe('POST')
 
-      const body = new URLSearchParams(opts.body)
+      const body = new URLSearchParams(params.body)
       expect(body.get('grant_type')).toBe('refresh_token')
       expect(body.get('refresh_token')).toBe('original-refresh-token')
       expect(body.get('client_id')).toBe('obsidian-multiplayer')
     })
 
     it('stores both new access and refresh tokens after successful refresh', async () => {
-      vi.stubGlobal('fetch', mockRefreshSuccess('new-at', 'new-rt'))
+      mockRefreshSuccess('new-at', 'new-rt')
 
       const { auth, tokenStore } = createAuthenticatedManager(30_000)
 
@@ -766,7 +773,7 @@ describe('AuthManager', () => {
     })
 
     it('returns null and signs out on 401 refresh response', async () => {
-      vi.stubGlobal('fetch', mockRefreshFailure(401))
+      mockRefreshFailure(401)
 
       const { auth } = createAuthenticatedManager(30_000)
 
@@ -779,7 +786,7 @@ describe('AuthManager', () => {
 
     it('shows "Session expired" notice on refresh failure', async () => {
       const NoticeSpy = vi.spyOn(Notice.prototype, 'constructor' as never)
-      vi.stubGlobal('fetch', mockRefreshFailure(401))
+      mockRefreshFailure(401)
 
       const { auth } = createAuthenticatedManager(30_000)
       await auth.getAccessToken()
@@ -793,8 +800,7 @@ describe('AuthManager', () => {
     })
 
     it('deduplicates concurrent refresh — only one POST made', async () => {
-      const fetchMock = mockRefreshSuccess()
-      vi.stubGlobal('fetch', fetchMock)
+      mockRefreshSuccess()
 
       const { auth } = createAuthenticatedManager(30_000)
 
@@ -806,11 +812,11 @@ describe('AuthManager', () => {
 
       expect(token1).toBe('refreshed-access-token')
       expect(token2).toBe('refreshed-access-token')
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(requestUrlMock).toHaveBeenCalledTimes(1)
     })
 
     it('emits auth-changed exactly once on refresh failure', async () => {
-      vi.stubGlobal('fetch', mockRefreshFailure())
+      mockRefreshFailure()
 
       const { auth } = createAuthenticatedManager(30_000)
       const handler = vi.fn()
@@ -823,7 +829,7 @@ describe('AuthManager', () => {
     })
 
     it('handles network error during refresh', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+      requestUrlMock.mockRejectedValue(new Error('Network error'))
 
       const { auth } = createAuthenticatedManager(30_000)
 
@@ -834,7 +840,7 @@ describe('AuthManager', () => {
     })
 
     it('refreshes expired token during restoreSession()', async () => {
-      vi.stubGlobal('fetch', mockRefreshSuccess())
+      mockRefreshSuccess()
 
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl: 'https://example.com' })
@@ -859,7 +865,7 @@ describe('AuthManager', () => {
     })
 
     it('signs out during restoreSession() if refresh fails', async () => {
-      vi.stubGlobal('fetch', mockRefreshFailure())
+      mockRefreshFailure()
 
       const app = new App()
       const settings = makeMultiplayerSettings({ serverUrl: 'https://example.com' })
@@ -884,8 +890,7 @@ describe('AuthManager', () => {
 
   describe('PKCE parameter quality', () => {
     it('code_verifier and state are base64url encoded (no +, /, or =)', async () => {
-      const fetchMock = mockFetchSuccess()
-      vi.stubGlobal('fetch', fetchMock)
+      mockRequestUrlSuccess()
 
       const { auth, server } = createAuthManager()
       const signInPromise = auth.signIn()
@@ -902,8 +907,11 @@ describe('AuthManager', () => {
       await signInPromise
 
       // Verify code_verifier from token request is base64url
-      const tokenCall = fetchMock.mock.calls.find((c: string[]) => c[0].includes('/auth/token'))
-      const body = new URLSearchParams(tokenCall![1].body)
+      const tokenCall = requestUrlMock.mock.calls.find(
+        (c) => (c[0] as { url: string }).url.includes('/auth/token')
+      )
+      const params = tokenCall![0] as { body: string }
+      const body = new URLSearchParams(params.body)
       const codeVerifier = body.get('code_verifier')!
       expect(codeVerifier).not.toMatch(/[+/=]/)
       // 64 bytes base64url ≈ 86 chars

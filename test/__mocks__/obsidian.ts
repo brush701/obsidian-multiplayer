@@ -96,6 +96,5 @@ export class MarkdownView {
 
 export class FileSystemAdapter extends DataAdapter {}
 
-export function requestUrl() {
-  throw new Error('requestUrl must be mocked in tests')
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const requestUrl = (globalThis as any).vi?.fn() ?? (() => { throw new Error('requestUrl must be mocked in tests') })

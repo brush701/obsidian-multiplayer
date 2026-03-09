@@ -1,5 +1,5 @@
-import type { App } from 'obsidian'
-import { Notice } from 'obsidian'
+import type { App, RequestUrlParam } from 'obsidian'
+import { Notice, requestUrl } from 'obsidian'
 import type { MultiplayerSettings } from './types'
 import type { IAuthManager } from './types'
 import { TokenStore } from './tokenStore'
@@ -246,8 +246,10 @@ export class AuthManager implements IAuthManager {
   async signOut(): Promise<void> {
     // Fire-and-forget server-side logout (best-effort, never blocks local sign-out)
     if (this._accessToken) {
-      fetch(`${this._settings.serverUrl}/auth/logout`, {
+      requestUrl({
+        url: `${this._settings.serverUrl}/auth/logout`,
         headers: { Authorization: `Bearer ${this._accessToken}` },
+        throw: false,
       }).catch(() => {})
     }
 
@@ -309,13 +311,15 @@ export class AuthManager implements IAuthManager {
         client_id: 'obsidian-multiplayer',
       })
 
-      const response = await fetch(`${this._settings.serverUrl}/auth/token`, {
+      const response = await requestUrl({
+        url: `${this._settings.serverUrl}/auth/token`,
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        contentType: 'application/x-www-form-urlencoded',
         body: body.toString(),
+        throw: false,
       })
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         this._hasAuthError = true
         await this.signOut()
         new Notice('Session expired — please sign in again')
@@ -323,7 +327,7 @@ export class AuthManager implements IAuthManager {
       }
 
       const data: { access_token: string; refresh_token: string; expires_in: number } =
-        await response.json()
+        response.json
 
       const expiresAt = new Date(Date.now() + data.expires_in * 1000).toISOString()
       this._tokenStore.save({
@@ -381,17 +385,19 @@ export class AuthManager implements IAuthManager {
       redirect_uri: redirectUri,
     })
 
-    const response = await fetch(`${this._settings.serverUrl}/auth/token`, {
+    const response = await requestUrl({
+      url: `${this._settings.serverUrl}/auth/token`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      contentType: 'application/x-www-form-urlencoded',
       body: body.toString(),
+      throw: false,
     })
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`Token exchange failed: ${response.status}`)
     }
 
-    return response.json()
+    return response.json
   }
 
   private async _fetchUserInfo(accessToken: string): Promise<{
@@ -399,14 +405,16 @@ export class AuthManager implements IAuthManager {
     email: string
     name: string
   }> {
-    const response = await fetch(`${this._settings.serverUrl}/auth/userinfo`, {
+    const response = await requestUrl({
+      url: `${this._settings.serverUrl}/auth/userinfo`,
       headers: { Authorization: `Bearer ${accessToken}` },
+      throw: false,
     })
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`UserInfo fetch failed: ${response.status}`)
     }
 
-    return response.json()
+    return response.json
   }
 }
