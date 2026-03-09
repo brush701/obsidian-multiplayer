@@ -19,6 +19,7 @@ import { AuthManager } from "./auth";
 import { TektiteApiClient } from "./api";
 
 import { Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { around } from "monkey-around";
 import {
 	SharedFolderModal,
@@ -181,6 +182,7 @@ export default class Multiplayer extends Plugin {
 				const sharedFolder = this.getSharedFolder(file.path);
 				if (sharedFolder) {
 					const sharedDoc = sharedFolder.getDoc(file.path);
+					sharedDoc.setRole(sharedFolder.cachedRole);
 					sharedDoc.connect();
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -190,6 +192,8 @@ export default class Multiplayer extends Plugin {
 							view.editor.setValue(sharedDoc.text);
 							this.registerEditorExtension(extensions);
 							this.app.workspace.updateOptions();
+							const cmView = (view.editor as any).cm as EditorView;
+							if (cmView) sharedDoc.setEditorView(cmView);
 							console.log("binding yjs");
 						});
 					}

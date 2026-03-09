@@ -3,7 +3,8 @@
 import * as Y from 'yjs'
 
 import { yCollab } from 'y-codemirror.next'
-import { Extension} from '@codemirror/state'
+import { Compartment, EditorState, Extension } from '@codemirror/state'
+import { EditorView, showPanel, Panel } from '@codemirror/view'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { WebsocketProvider } from 'y-websocket'
 import { randomUUID } from "crypto";
@@ -170,6 +171,10 @@ const usercolors = [
     try {
       const result = await this.plugin.apiClient.getMyRole(this.settings.guid)
       this.cachedRole = result.role
+      // Propagate role to all open SharedDocs
+      for (const doc of this.docs.values()) {
+        doc.setRole(result.role)
+      }
     } catch {
       // Role fetch is best-effort; menu defaults to showing all items
     }
@@ -235,19 +240,57 @@ const usercolors = [
 
 }
 
+function readOnlyPanel(): Panel {
+  const dom = document.createElement('div')
+  dom.className = 'cm-readonly-banner'
+  dom.textContent = 'Read only'
+  dom.style.cssText = 'padding:4px 12px;background:var(--background-secondary);color:var(--text-muted);font-size:12px;border-bottom:1px solid var(--background-modifier-border);'
+  return { dom, top: true }
+}
+
 export class SharedDoc {
   guid: string
   private _parent: SharedFolder
   private _binding: Extension;
+  private _role: RoomRole | null = null
+  private _readOnlyCompartment = new Compartment()
+  private _panelCompartment = new Compartment()
+  private _editorView: EditorView | null = null
 
     public get binding(): Extension {
         if (!this._binding) {
             const yText = this.ydoc.getText('contents')
-            const undoManager = new Y.UndoManager(yText)
-            this._binding = yCollab(yText, this._provider.awareness, { undoManager })
+            const isViewer = this._role === 'VIEWER'
+            const undoManager = isViewer ? false as const : new Y.UndoManager(yText)
+            this._binding = [
+                yCollab(yText, this._provider.awareness, { undoManager }),
+                this._readOnlyCompartment.of(EditorState.readOnly.of(isViewer)),
+                this._panelCompartment.of(isViewer ? showPanel.of(readOnlyPanel) : []),
+            ]
         }
         return this._binding;
     }
+
+  get role(): RoomRole | null {
+    return this._role
+  }
+
+  setEditorView(view: EditorView): void {
+    this._editorView = view
+  }
+
+  setRole(role: RoomRole | null): void {
+    if (role === this._role) return
+    this._role = role
+    if (!this._binding || !this._editorView) return
+    const isViewer = role === 'VIEWER'
+    this._editorView.dispatch({
+      effects: [
+        this._readOnlyCompartment.reconfigure(EditorState.readOnly.of(isViewer)),
+        this._panelCompartment.reconfigure(isViewer ? showPanel.of(readOnlyPanel) : []),
+      ]
+    })
+  }
 
   private _persistence: IndexeddbPersistence
   private _provider: WebsocketProvider
@@ -313,6 +356,7 @@ export class SharedDoc {
   // This method cleanly tears down the doc's persistence, provider, and binding.
   close() {
     this._binding = null
+    this._editorView = null
 
     this._provider.destroy()
     this._persistence.destroy()
