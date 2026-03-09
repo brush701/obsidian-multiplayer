@@ -1,10 +1,10 @@
 ---
 id: TASK-19
 title: '[P3-S4] Protocol handler: auto-join from browser'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-08 18:38'
+updated_date: '2026-03-09 03:13'
 labels:
   - enhancement
   - 'epic: P3 - Room Management'

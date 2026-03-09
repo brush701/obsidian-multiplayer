@@ -1,10 +1,10 @@
 ---
 id: TASK-42
 title: Switch OAuth redirect to loopback HTTP server (RFC 8252 §7.3)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 23:48'
-updated_date: '2026-03-08 23:58'
+updated_date: '2026-03-09 03:13'
 labels:
   - auth
   - enhancement
