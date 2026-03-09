@@ -20,7 +20,7 @@ import { TektiteApiClient } from './api'
 
 import { Extension} from '@codemirror/state'
 import { around } from "monkey-around"
-import { SharedFolderModal, UnshareFolderModal } from "./modals";
+import { SharedFolderModal, UnshareFolderModal, FolderSelectModal } from "./modals";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
   serverUrl: '',
@@ -105,6 +105,8 @@ export default class Multiplayer extends Plugin {
         setting.openTabById(this.manifest.id)
       }
     })
+
+    this.registerObsidianProtocolHandler('multiplayer/join', (params) => this._handleJoinProtocol(params));
 
     this.settings.sharedFolders.forEach((sharedFolder: SharedTypeSettings) => {
       const newSharedFolder = new SharedFolder(sharedFolder, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this)
@@ -239,6 +241,60 @@ export default class Multiplayer extends Plugin {
 
   private _detachStatusListeners(folder: SharedFolder): void {
     folder.offStatusChange(this._statusChangeHandler)
+  }
+
+  private _handleJoinProtocol(params: Record<string, string>): void {
+    const { guid, name, server } = params;
+
+    if (!guid || !name) {
+      new Notice('Invalid invite link: missing room information.');
+      return;
+    }
+
+    if (!this.authManager.isAuthenticated) {
+      new Notice('Sign in first.');
+      return;
+    }
+
+    if (!this.settings.serverUrl) {
+      new Notice('Configure a server URL in settings first.');
+      return;
+    }
+
+    if (server) {
+      const normalise = (u: string) => u.replace(/\/+$/, '').toLowerCase();
+      if (normalise(server) !== normalise(this.settings.serverUrl)) {
+        new Notice('This invite is for a different server.');
+        return;
+      }
+    }
+
+    if (this.sharedFolders.some(sf => sf.settings.guid === guid)) {
+      new Notice('You are already in this room.');
+      return;
+    }
+
+    new FolderSelectModal(this.app, async (folder) => {
+      try {
+        const hasOverlap = this.sharedFolders.some(sf =>
+          folder.path.includes(sf.settings.path) || sf.settings.path.includes(folder.path)
+        );
+        if (hasOverlap) {
+          new Notice('This folder is already a shared folder.');
+          return;
+        }
+
+        const settings = { guid, name, path: folder.path };
+        this.settings.sharedFolders.push(settings);
+        await this.saveSettings();
+        const newFolder = new SharedFolder(settings, (this.app.vault.adapter as FileSystemAdapter).getBasePath(), this);
+        this.addSharedFolder(newFolder);
+        new Notice(`Joined room "${name}".`);
+      } catch (e) {
+        new Notice('Could not join room: unexpected error.');
+        console.error('multiplayer: join protocol error', e);
+      }
+    }).open();
   }
 
   addSharedFolder(folder: SharedFolder): void {
