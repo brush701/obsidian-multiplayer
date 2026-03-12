@@ -43,6 +43,9 @@ export class SharedFolder {
 	private _provider: WebsocketProvider;
 	private _vaultRoot: string;
 	private _fileDecisions = new Map<string, OverwriteDecision | "pending">();
+	private _overwriteQueue: string[] = [];
+	private _processingQueue = false;
+	private _onAcceptCallbacks: ((path: string) => void)[] = [];
 
 	constructor(
 		settings: SharedTypeSettings,
@@ -92,7 +95,7 @@ export class SharedFolder {
 							const stats = statSync(fullPath);
 							if (stats.size > 0) {
 								this._fileDecisions.set(path, "pending");
-								this._promptForOverwrite(path);
+								this._enqueueOverwritePrompt(path);
 							} else {
 								this._fileDecisions.set(path, "accept");
 							}
@@ -196,11 +199,32 @@ export class SharedFolder {
 		return decision === "keep" || decision === "pending";
 	}
 
-	private async _promptForOverwrite(path: string): Promise<void> {
-		const modal = new FileOverwriteWarningModal(this.plugin.app, path);
-		modal.open();
-		const decision = await modal.decision;
-		this._fileDecisions.set(path, decision);
+	onAccept(callback: (path: string) => void): void {
+		this._onAcceptCallbacks.push(callback);
+	}
+
+	private _enqueueOverwritePrompt(path: string): void {
+		this._overwriteQueue.push(path);
+		if (!this._processingQueue) {
+			this._processOverwriteQueue();
+		}
+	}
+
+	private async _processOverwriteQueue(): Promise<void> {
+		this._processingQueue = true;
+		while (this._overwriteQueue.length > 0) {
+			const path = this._overwriteQueue.shift()!;
+			const modal = new FileOverwriteWarningModal(this.plugin.app, path);
+			modal.open();
+			const decision = await modal.decision;
+			this._fileDecisions.set(path, decision);
+			if (decision === "accept") {
+				for (const cb of this._onAcceptCallbacks) {
+					cb(path);
+				}
+			}
+		}
+		this._processingQueue = false;
 	}
 
 	private async _connectWithAuth(): Promise<void> {
