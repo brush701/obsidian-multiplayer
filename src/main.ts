@@ -18,7 +18,6 @@ import { MultiplayerSettings, ConnectionStatus } from "./types";
 import { AuthManager } from "./auth";
 import { TektiteApiClient } from "./api";
 
-import { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { around } from "monkey-around";
 import {
@@ -28,6 +27,7 @@ import {
 	MembersModal,
 	FolderSelectModal,
 } from "./modals";
+import { DocExtensionManager } from "./docExtensions";
 
 const DEFAULT_SETTINGS: MultiplayerSettings = {
 	serverUrl: "",
@@ -42,7 +42,7 @@ export default class Multiplayer extends Plugin {
 	authManager: AuthManager;
 	apiClient: TektiteApiClient;
 	sharedFolders: SharedFolder[];
-	private _extensions: Extension[];
+	private _docExtensions = new DocExtensionManager();
 	private _iconStyleEl: HTMLStyleElement | null = null;
 	private _statusBarEl: HTMLElement | null = null;
 	private _statusChangeHandler = () => this._updateStatusBar();
@@ -57,7 +57,6 @@ export default class Multiplayer extends Plugin {
 			requestUrl,
 		);
 		this.sharedFolders = [];
-		this._extensions = [];
 		this.setup();
 	}
 
@@ -69,7 +68,8 @@ export default class Multiplayer extends Plugin {
 					f.destroy();
 				});
 				this.sharedFolders = [];
-				this._extensions.length = 0;
+				this._reconfigureAllEmpty();
+				this._docExtensions.clear();
 				this.app.workspace.updateOptions();
 				this.refreshIconStyles();
 			}
@@ -176,7 +176,6 @@ export default class Multiplayer extends Plugin {
 		);
 		this._updateStatusBar();
 
-		const extensions = this._extensions;
 		this.app.workspace.on("file-open", (file) => {
 			if (file) {
 				const sharedFolder = this.getSharedFolder(file.path);
@@ -187,15 +186,22 @@ export default class Multiplayer extends Plugin {
 					const view =
 						this.app.workspace.getActiveViewOfType(MarkdownView);
 					if (view) {
-						extensions.push(sharedDoc.binding);
+						const { compartment, isNew } =
+							this._docExtensions.getOrCreate(file.path);
+						if (isNew) {
+							this.registerEditorExtension(compartment.of([]));
+						}
 						sharedDoc.onceSynced().then(() => {
 							view.editor.setValue(sharedDoc.text);
-							this.registerEditorExtension(extensions);
-							this.app.workspace.updateOptions();
 							// eslint-disable-next-line @typescript-eslint/no-explicit-any
 							const cmView = (view.editor as any)
 								.cm as EditorView;
-							if (cmView) sharedDoc.setEditorView(cmView);
+							if (cmView) {
+								cmView.dispatch({
+									effects: compartment.reconfigure(sharedDoc.binding),
+								});
+								sharedDoc.setEditorView(cmView);
+							}
 							console.log("binding yjs");
 						});
 					}
@@ -221,6 +227,7 @@ export default class Multiplayer extends Plugin {
 			const folder = this.getSharedFolder(oldPath);
 			if (folder) {
 				folder.renameDoc(file.path, oldPath);
+				this._docExtensions.rename(oldPath, file.path);
 			}
 		});
 
@@ -228,12 +235,8 @@ export default class Multiplayer extends Plugin {
 		const plugin = this;
 
 		const patchOnUnloadFile = around(MarkdownView.prototype, {
-			// replace MarkdownView.onLoadFile() with the following function
 			onUnloadFile(old) {
-				// old is the original onLoadFile function
 				return function (file) {
-					// onLoadFile takes one argument, file
-
 					const sharedFolder = plugin.getSharedFolder(file.path);
 
 					if (sharedFolder) {
@@ -244,13 +247,21 @@ export default class Multiplayer extends Plugin {
 							);
 							console.log("disconnecting room", subdoc.path);
 							subdoc.close();
-							extensions.length = 0;
-							this.app.workspace.updateOptions();
+							const effect =
+								plugin._docExtensions.emptyEffect(file.path);
+							if (effect) {
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								const cmView = (this.editor as any)
+									.cm as EditorView;
+								if (cmView) {
+									cmView.dispatch({ effects: effect });
+								}
+							}
 						} catch (e) {
 							console.log(e.message);
 						}
 					}
-					return old.call(this, file); // now call the orignal function and bind the current scope to it
+					return old.call(this, file);
 				};
 			},
 		});
@@ -259,6 +270,22 @@ export default class Multiplayer extends Plugin {
 		this.register(patchOnUnloadFile);
 
 		this.refreshIconStyles();
+	}
+
+	private _reconfigureAllEmpty(): void {
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			if (leaf.view instanceof MarkdownView) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const cmView = (leaf.view.editor as any).cm as EditorView;
+				if (cmView) {
+					for (const compartment of this._docExtensions.values()) {
+						cmView.dispatch({
+							effects: compartment.reconfigure([]),
+						});
+					}
+				}
+			}
+		});
 	}
 
 	refreshIconStyles() {
