@@ -198,7 +198,9 @@ export default class Multiplayer extends Plugin {
 								.cm as EditorView;
 							if (cmView) {
 								cmView.dispatch({
-									effects: compartment.reconfigure(sharedDoc.binding),
+									effects: compartment.reconfigure(
+										sharedDoc.binding,
+									),
 								});
 								sharedDoc.setEditorView(cmView);
 							}
@@ -247,8 +249,9 @@ export default class Multiplayer extends Plugin {
 							);
 							console.log("disconnecting room", subdoc.path);
 							subdoc.close();
-							const effect =
-								plugin._docExtensions.emptyEffect(file.path);
+							const effect = plugin._docExtensions.emptyEffect(
+								file.path,
+							);
 							if (effect) {
 								// eslint-disable-next-line @typescript-eslint/no-explicit-any
 								const cmView = (this.editor as any)
