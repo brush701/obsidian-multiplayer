@@ -171,6 +171,7 @@ export default class Multiplayer extends Plugin {
 					this,
 				);
 				this._attachStatusListeners(newSharedFolder);
+				this._registerOnAccept(newSharedFolder);
 				this.sharedFolders.push(newSharedFolder);
 			},
 		);
@@ -179,39 +180,15 @@ export default class Multiplayer extends Plugin {
 		this.app.workspace.on("file-open", (file) => {
 			if (file) {
 				const sharedFolder = this.getSharedFolder(file.path);
-				if (sharedFolder) {
-					const sharedDoc = sharedFolder.getDoc(file.path);
-					sharedDoc.setRole(sharedFolder.cachedRole);
-					sharedDoc.connect();
-					const view =
-						this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (view) {
-						const { compartment, isNew } =
-							this._docExtensions.getOrCreate(file.path);
-						if (isNew) {
-							this.registerEditorExtension(compartment.of([]));
-						}
-						sharedDoc.onceSynced().then(() => {
-							view.editor.setValue(sharedDoc.text);
-							// eslint-disable-next-line @typescript-eslint/no-explicit-any
-							const cmView = (view.editor as any)
-								.cm as EditorView;
-							if (cmView) {
-								cmView.dispatch({
-									effects: compartment.reconfigure(sharedDoc.binding),
-								});
-								sharedDoc.setEditorView(cmView);
-							}
-							console.log("binding yjs");
-						});
-					}
+				if (sharedFolder && !sharedFolder.isFileKept(file.path)) {
+					this._bindSharedDoc(file.path, sharedFolder);
 				}
 			}
 		});
 
 		this.app.vault.on("create", (file) => {
 			const folder = this.getSharedFolder(file.path);
-			if (folder) {
+			if (folder && !folder.isFileKept(file.path)) {
 				folder.createDoc(file.path);
 			}
 		});
@@ -247,8 +224,9 @@ export default class Multiplayer extends Plugin {
 							);
 							console.log("disconnecting room", subdoc.path);
 							subdoc.close();
-							const effect =
-								plugin._docExtensions.emptyEffect(file.path);
+							const effect = plugin._docExtensions.emptyEffect(
+								file.path,
+							);
 							if (effect) {
 								// eslint-disable-next-line @typescript-eslint/no-explicit-any
 								const cmView = (this.editor as any)
@@ -346,6 +324,47 @@ export default class Multiplayer extends Plugin {
 		folder.offStatusChange(this._statusChangeHandler);
 	}
 
+	private _registerOnAccept(folder: SharedFolder): void {
+		folder.onAccept((path: string) => {
+			// If the accepted file is currently open, activate the binding
+			const activeFile =
+				this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (
+				activeFile &&
+				activeFile.file &&
+				activeFile.file.path === path
+			) {
+				this._bindSharedDoc(path, folder);
+			}
+		});
+	}
+
+	private _bindSharedDoc(path: string, sharedFolder: SharedFolder): void {
+		const sharedDoc = sharedFolder.getDoc(path);
+		sharedDoc.setRole(sharedFolder.cachedRole);
+		sharedDoc.connect();
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) {
+			const { compartment, isNew } =
+				this._docExtensions.getOrCreate(path);
+			if (isNew) {
+				this.registerEditorExtension(compartment.of([]));
+			}
+			sharedDoc.onceSynced().then(() => {
+				view.editor.setValue(sharedDoc.text);
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const cmView = (view.editor as any).cm as EditorView;
+				if (cmView) {
+					cmView.dispatch({
+						effects: compartment.reconfigure(sharedDoc.binding),
+					});
+					sharedDoc.setEditorView(cmView);
+				}
+				console.log("binding yjs");
+			});
+		}
+	}
+
 	private _handleJoinProtocol(params: Record<string, string>): void {
 		const { guid, name, server } = params;
 
@@ -409,6 +428,7 @@ export default class Multiplayer extends Plugin {
 
 	addSharedFolder(folder: SharedFolder): void {
 		this._attachStatusListeners(folder);
+		this._registerOnAccept(folder);
 		this.sharedFolders.push(folder);
 		this.refreshIconStyles();
 		this._updateStatusBar();

@@ -8,10 +8,12 @@ import { EditorView, showPanel, Panel } from "@codemirror/view";
 import { IndexeddbPersistence } from "y-indexeddb";
 import { WebsocketProvider } from "y-websocket";
 import { randomUUID } from "crypto";
-import { existsSync, readFileSync, open, mkdirSync } from "fs";
+import { existsSync, readFileSync, statSync, open, mkdirSync } from "fs";
 import { dirname } from "path";
 import { Notice } from "obsidian";
 import type { RoomRole } from "./types";
+import type { OverwriteDecision } from "./fileOverwriteModal";
+import { FileOverwriteWarningModal } from "./fileOverwriteModal";
 import Multiplayer from "./main";
 export interface SharedTypeSettings {
 	guid: string;
@@ -40,6 +42,10 @@ export class SharedFolder {
 	private _persistence: IndexeddbPersistence;
 	private _provider: WebsocketProvider;
 	private _vaultRoot: string;
+	private _fileDecisions = new Map<string, OverwriteDecision | "pending">();
+	private _overwriteQueue: string[] = [];
+	private _processingQueue = false;
+	private _onAcceptCallbacks: ((path: string) => void)[] = [];
 
 	constructor(
 		settings: SharedTypeSettings,
@@ -74,12 +80,28 @@ export class SharedFolder {
 				const map = doc.getMap<string>("docs");
 				map.forEach((guid, path) => {
 					const fullPath = this._vaultRoot + path;
+
+					if (this._fileDecisions.has(path)) return;
+
 					if (!existsSync(fullPath)) {
 						const dir = dirname(fullPath);
 						if (!existsSync(dir)) {
 							mkdirSync(dir, { recursive: true });
 						}
 						open(fullPath, "w", () => {}); //create the file
+						this._fileDecisions.set(path, "accept");
+					} else {
+						try {
+							const stats = statSync(fullPath);
+							if (stats.size > 0) {
+								this._fileDecisions.set(path, "pending");
+								this._enqueueOverwritePrompt(path);
+							} else {
+								this._fileDecisions.set(path, "accept");
+							}
+						} catch {
+							this._fileDecisions.set(path, "accept");
+						}
 					}
 				});
 				// delete files that are no longer shared
@@ -170,6 +192,39 @@ export class SharedFolder {
 			this.ids.delete(oldpath);
 			this.ids.set(newpath, guid);
 		}
+	}
+
+	isFileKept(path: string): boolean {
+		const decision = this._fileDecisions.get(path);
+		return decision === "keep" || decision === "pending";
+	}
+
+	onAccept(callback: (path: string) => void): void {
+		this._onAcceptCallbacks.push(callback);
+	}
+
+	private _enqueueOverwritePrompt(path: string): void {
+		this._overwriteQueue.push(path);
+		if (!this._processingQueue) {
+			this._processOverwriteQueue();
+		}
+	}
+
+	private async _processOverwriteQueue(): Promise<void> {
+		this._processingQueue = true;
+		while (this._overwriteQueue.length > 0) {
+			const path = this._overwriteQueue.shift()!;
+			const modal = new FileOverwriteWarningModal(this.plugin.app, path);
+			modal.open();
+			const decision = await modal.decision;
+			this._fileDecisions.set(path, decision);
+			if (decision === "accept") {
+				for (const cb of this._onAcceptCallbacks) {
+					cb(path);
+				}
+			}
+		}
+		this._processingQueue = false;
 	}
 
 	private async _connectWithAuth(): Promise<void> {
