@@ -30,6 +30,26 @@ vi.mock("obsidian", () => ({
 	Notice: class {
 		constructor(_msg: string) {}
 	},
+	App: class {},
+	Modal: class {
+		contentEl = {
+			empty: () => {},
+			createEl: () => ({
+				onClickEvent: () => {},
+				style: {},
+			}),
+			createDiv: () => ({
+				style: {},
+				createEl: () => ({
+					onClickEvent: () => {},
+					style: {},
+				}),
+			}),
+		};
+		modalEl = { addClass: () => {} };
+		open() {}
+		close() {}
+	},
 }));
 
 import { SharedDoc } from "../src/sharedTypes";

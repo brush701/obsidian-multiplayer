@@ -179,7 +179,7 @@ export default class Multiplayer extends Plugin {
 		this.app.workspace.on("file-open", (file) => {
 			if (file) {
 				const sharedFolder = this.getSharedFolder(file.path);
-				if (sharedFolder) {
+				if (sharedFolder && !sharedFolder.isFileKept(file.path)) {
 					const sharedDoc = sharedFolder.getDoc(file.path);
 					sharedDoc.setRole(sharedFolder.cachedRole);
 					sharedDoc.connect();
@@ -211,7 +211,7 @@ export default class Multiplayer extends Plugin {
 
 		this.app.vault.on("create", (file) => {
 			const folder = this.getSharedFolder(file.path);
-			if (folder) {
+			if (folder && !folder.isFileKept(file.path)) {
 				folder.createDoc(file.path);
 			}
 		});
