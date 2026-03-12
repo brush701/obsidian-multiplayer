@@ -105,14 +105,13 @@ import { SharedFolder, SharedDoc } from "../src/sharedTypes";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makePlugin(overrides: any = {}) {
-	const settings = {
-		serverUrl: "https://example.com",
-		username: "test-user",
-		sharedFolders: [] as any[],
-		...overrides.settings,
-	};
 	return {
-		settings,
+		settings: {
+			serverUrl: "https://example.com",
+			username: "test-user",
+			sharedFolders: [] as any[],
+			...overrides.settings,
+		},
 		authManager: {
 			getAccessToken: vi.fn().mockResolvedValue("tok-123"),
 			signOutWithAuthError: vi.fn(),
@@ -127,11 +126,11 @@ function makePlugin(overrides: any = {}) {
 				getFiles: () => [],
 				adapter: { trashLocal: vi.fn() },
 			},
+			...overrides.app,
 		},
 		sharedFolders: [] as any[],
 		saveSettings: vi.fn(),
 		refreshIconStyles: vi.fn(),
-		...overrides,
 	};
 }
 
@@ -211,21 +210,14 @@ beforeEach(() => {
 
 describe("SharedFolder", () => {
 	describe("constructor", () => {
-		it("creates WebsocketProvider with correct wsUrl", () => {
+		it("wires up provider, persistence, and ids map", () => {
 			const { folder } = makeSharedFolder();
 			const provider = getProvider(folder);
-			// The provider was constructed (and captured via mock)
 			expect(provider).toBeDefined();
-			expect(provider.connect).toBeDefined();
-		});
-
-		it("creates provider with connect: false (deferred auth)", () => {
-			// Provider.connect is called by _connectWithAuth, not the constructor options
-			// We verify connect was called (async) rather than at construction time
-			const { folder } = makeSharedFolder();
-			const provider = getProvider(folder);
-			// connect is called asynchronously by _connectWithAuth
-			expect(provider).toBeDefined();
+			// ids map is bound to the root Y.Doc
+			expect(folder.ids).toBe(folder.root.getMap("docs"));
+			// connection-close handler is registered
+			expect(provider._handlers["connection-close"]?.length).toBe(1);
 		});
 
 		it("skips _connectWithAuth when serverUrl is empty", () => {
@@ -277,12 +269,12 @@ describe("SharedFolder", () => {
 		it("propagates role to existing SharedDocs", async () => {
 			const { folder } = makeSharedFolder();
 			mockExistsSync.mockReturnValue(false);
-			// Create a doc before the role arrives
-			folder.createDoc("shared/test.md");
-			// Re-trigger fetchRole by making a new folder (role propagation is tested inline)
+			// Create a doc before the async role fetch completes
+			const doc = folder.createDoc("shared/test.md");
+			expect(doc.role).toBeNull(); // role hasn't arrived yet
+			// Let _fetchRole complete
 			await new Promise((r) => setTimeout(r, 0));
-			// The folder's cachedRole is set — docs created later get it via getDoc
-			expect(folder.cachedRole).toBe("EDITOR");
+			expect(doc.role).toBe("EDITOR");
 		});
 
 		it("silently ignores API errors", async () => {
@@ -591,19 +583,14 @@ describe("SharedFolder", () => {
 
 describe("SharedDoc", () => {
 	describe("constructor", () => {
-		it("creates a provider and sets awareness user fields", () => {
+		it("sets up provider, awareness user fields, and connection-close handler", () => {
 			const { doc } = makeSharedDoc();
 			const provider = getProvider(doc);
 			expect(provider.awareness.setLocalStateField).toHaveBeenCalledWith(
 				"user",
 				expect.objectContaining({ name: "test-user" }),
 			);
-		});
-
-		it("creates provider with connect: false (deferred auth)", () => {
-			const { doc } = makeSharedDoc();
-			const provider = getProvider(doc);
-			expect(provider).toBeDefined();
+			expect(provider._handlers["connection-close"]?.length).toBe(1);
 		});
 
 		it("skips _connectWithAuth when serverUrl is empty", () => {
@@ -663,6 +650,14 @@ describe("SharedDoc", () => {
 			const { doc } = makeSharedDoc();
 			const provider = getProvider(doc);
 			fireCloseEvent(provider, 1006);
+			expect(provider.disconnect).not.toHaveBeenCalled();
+		});
+
+		it("null event → no disconnect", () => {
+			const { doc } = makeSharedDoc();
+			const provider = getProvider(doc);
+			const handlers = provider._handlers["connection-close"] ?? [];
+			for (const h of handlers) h(null);
 			expect(provider.disconnect).not.toHaveBeenCalled();
 		});
 	});
