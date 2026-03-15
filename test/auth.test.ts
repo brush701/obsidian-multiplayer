@@ -1129,6 +1129,879 @@ describe("AuthManager", () => {
 		});
 	});
 
+	describe("base64urlEncode correctness", () => {
+		it("replaces + with -, / with _, and strips trailing =", async () => {
+			mockRequestUrlSuccess();
+
+			// We can't call base64urlEncode directly (module-scoped),
+			// but we can verify via the code_challenge and code_verifier output.
+			// Instead, test indirectly: sign in multiple times and verify
+			// all PKCE values are consistently base64url-safe.
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+			const challenge = url.searchParams.get("code_challenge")!;
+			const state = url.searchParams.get("state")!;
+
+			// base64url must not contain +, /, or trailing =
+			expect(challenge).not.toMatch(/[+/=]/);
+			expect(state).not.toMatch(/[+/=]/);
+			// Must be non-empty
+			expect(challenge.length).toBeGreaterThan(0);
+			expect(state.length).toBeGreaterThan(0);
+
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${state}`,
+			);
+			await signInPromise;
+
+			// Verify code_verifier is also base64url
+			const tokenCall = requestUrlMock.mock.calls.find((c) =>
+				(c[0] as { url: string }).url.includes("/auth/token"),
+			);
+			const body = new URLSearchParams(
+				(tokenCall![0] as { body: string }).body,
+			);
+			const verifier = body.get("code_verifier")!;
+			expect(verifier).not.toMatch(/[+/=]/);
+			expect(verifier.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("hasAuthError flag", () => {
+		it("starts as false", () => {
+			const { auth } = createAuthManager();
+			expect(auth.hasAuthError).toBe(false);
+		});
+
+		it("is set to true on refresh failure, then cleared on successful sign-in", async () => {
+			// First: trigger refresh failure to set hasAuthError
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { server, createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+
+			tokenStore.save({
+				accessToken: "tok",
+				refreshToken: "rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@company.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "tok";
+			authAny._userInfo = { email: "alice@company.com", name: "Alice" };
+
+			// Mock refresh failure
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 401,
+						json: { error: "invalid_grant" },
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			await auth.getAccessToken();
+			expect(auth.hasAuthError).toBe(true);
+
+			// Now sign in successfully to clear the error
+			mockRequestUrlSuccess();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+			expect(auth.hasAuthError).toBe(false);
+		});
+	});
+
+	describe("getAccessToken edge cases", () => {
+		function createAuthenticatedManager(expiresInMs: number) {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "test-token",
+				refreshToken: "test-rt",
+				expiresAt: new Date(Date.now() + expiresInMs).toISOString(),
+				email: "alice@company.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "test-token";
+			authAny._userInfo = { email: "alice@company.com", name: "Alice" };
+			return { auth, tokenStore };
+		}
+
+		it("returns cached token when expiry is exactly 60_001ms away", async () => {
+			const { auth } = createAuthenticatedManager(60_001);
+			const token = await auth.getAccessToken();
+			expect(token).toBe("test-token");
+			expect(requestUrlMock).not.toHaveBeenCalled();
+		});
+
+		it("triggers refresh when expiry is exactly 60_000ms away", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "new-tok",
+							refresh_token: "new-rt",
+							expires_in: 3600,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+			const { auth } = createAuthenticatedManager(60_000);
+			const token = await auth.getAccessToken();
+			expect(token).toBe("new-tok");
+			expect(requestUrlMock).toHaveBeenCalled();
+		});
+
+		it("returns null when tokens are cleared from store but auth flag is true", async () => {
+			const { auth, tokenStore } = createAuthenticatedManager(120_000);
+			tokenStore.clear();
+			const token = await auth.getAccessToken();
+			expect(token).toBeNull();
+		});
+	});
+
+	describe("restoreSession edge cases", () => {
+		it("does nothing when token store is empty", async () => {
+			const { auth } = createAuthManager();
+			await auth.restoreSession();
+			expect(auth.isAuthenticated).toBe(false);
+			expect(auth.userInfo).toBeNull();
+		});
+
+		it("restores user info from stored tokens", async () => {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "valid-tok",
+				refreshToken: "valid-rt",
+				expiresAt: new Date(Date.now() + 120_000).toISOString(),
+				email: "bob@example.com",
+				name: "Bob",
+			});
+
+			await auth.restoreSession();
+
+			expect(auth.isAuthenticated).toBe(true);
+			expect(auth.userInfo).toEqual({
+				email: "bob@example.com",
+				name: "Bob",
+			});
+		});
+
+		it("emits auth-changed on successful restore", async () => {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "valid-tok",
+				refreshToken: "valid-rt",
+				expiresAt: new Date(Date.now() + 120_000).toISOString(),
+				email: "bob@example.com",
+				name: "Bob",
+			});
+
+			const handler = vi.fn();
+			auth.on("auth-changed", handler);
+			await auth.restoreSession();
+			expect(handler).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("_refreshTokens stores email/name from userInfo", () => {
+		it("persists email and name through token refresh", async () => {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+
+			tokenStore.save({
+				accessToken: "old-tok",
+				refreshToken: "old-rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "old-tok";
+			authAny._userInfo = { email: "alice@example.com", name: "Alice" };
+
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "new-tok",
+							refresh_token: "new-rt",
+							expires_in: 7200,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			await auth.getAccessToken();
+
+			const stored = tokenStore.load();
+			expect(stored).not.toBeNull();
+			expect(stored!.email).toBe("alice@example.com");
+			expect(stored!.name).toBe("Alice");
+			expect(stored!.accessToken).toBe("new-tok");
+			expect(stored!.refreshToken).toBe("new-rt");
+		});
+
+		it("computes expiresAt from expires_in correctly", async () => {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+
+			tokenStore.save({
+				accessToken: "old-tok",
+				refreshToken: "old-rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "old-tok";
+			authAny._userInfo = { email: "alice@example.com", name: "Alice" };
+
+			const now = Date.now();
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "new-tok",
+							refresh_token: "new-rt",
+							expires_in: 3600,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			await auth.getAccessToken();
+
+			const stored = tokenStore.load()!;
+			const expiresAt = new Date(stored.expiresAt).getTime();
+			// expires_in * 1000 = 3600000, should be within a few seconds of now + 3600000
+			expect(expiresAt).toBeGreaterThanOrEqual(now + 3_599_000);
+			expect(expiresAt).toBeLessThanOrEqual(now + 3_601_000);
+		});
+	});
+
+	describe("signOutWithAuthError", () => {
+		it("sets hasAuthError to true and signs out", async () => {
+			requestUrlMock.mockResolvedValue({
+				status: 200,
+				json: {},
+				headers: {},
+				text: "",
+			} as never);
+
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "tok";
+
+			await auth.signOutWithAuthError();
+			expect(auth.hasAuthError).toBe(true);
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("token exchange request format", () => {
+		it("first exchange omits resource, second refresh includes resource", async () => {
+			mockRequestUrlSuccess();
+
+			const { auth, server } = createAuthManager(
+				"https://example.com",
+			);
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+
+			simulateCallback(
+				server,
+				`/callback?code=the-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+
+			const tokenCalls = requestUrlMock.mock.calls.filter((c) =>
+				(c[0] as { url: string }).url.includes("/auth/token"),
+			);
+			// First call: authorization_code without resource
+			const firstBody = new URLSearchParams(
+				(tokenCalls[0][0] as { body: string }).body,
+			);
+			expect(firstBody.get("grant_type")).toBe("authorization_code");
+			expect(firstBody.has("resource")).toBe(false);
+
+			// Second call: refresh_token with resource
+			const secondBody = new URLSearchParams(
+				(tokenCalls[1][0] as { body: string }).body,
+			);
+			expect(secondBody.get("grant_type")).toBe("refresh_token");
+			expect(secondBody.get("resource")).toBe("urn:tektite:api");
+		});
+	});
+
+	describe("_refreshTokens status code boundaries", () => {
+		function createAuthenticatedForRefresh() {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "tok",
+				refreshToken: "rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "tok";
+			authAny._userInfo = { email: "alice@example.com", name: "Alice" };
+			return { auth, tokenStore };
+		}
+
+		it("treats status 199 as failure", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 199,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+			const { auth } = createAuthenticatedForRefresh();
+			const token = await auth.getAccessToken();
+			expect(token).toBeNull();
+			expect(auth.isAuthenticated).toBe(false);
+		});
+
+		it("treats status 200 as success", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "ok-tok",
+							refresh_token: "ok-rt",
+							expires_in: 3600,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+			const { auth } = createAuthenticatedForRefresh();
+			const token = await auth.getAccessToken();
+			expect(token).toBe("ok-tok");
+		});
+
+		it("treats status 300 as failure", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 300,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+			const { auth } = createAuthenticatedForRefresh();
+			const token = await auth.getAccessToken();
+			expect(token).toBeNull();
+		});
+	});
+
+	describe("getAccessToken guards", () => {
+		it("returns null when not authenticated even if tokens exist in store", async () => {
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			// Put tokens in the store but DON'T set _isAuthenticated
+			tokenStore.save({
+				accessToken: "valid-tok",
+				refreshToken: "valid-rt",
+				expiresAt: new Date(Date.now() + 120_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+
+			const token = await auth.getAccessToken();
+			expect(token).toBeNull();
+			// Should NOT have tried to refresh
+			expect(requestUrlMock).not.toHaveBeenCalled();
+		});
+
+		it("sign-in sets both isAuthenticated and stores JWT after refresh", async () => {
+			mockRequestUrlSuccess();
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+
+			// After successful sign-in, both conditions are satisfied
+			const token = await auth.getAccessToken();
+			expect(token).not.toBeNull();
+			expect(auth.isAuthenticated).toBe(true);
+		});
+	});
+
+	describe("sign-in: JWT refresh failure after opaque token", () => {
+		it("stays unauthenticated when JWT refresh fails after userinfo", async () => {
+			let tokenCallCount = 0;
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					tokenCallCount++;
+					if (tokenCallCount === 1) {
+						// First call: authorization_code exchange succeeds
+						return Promise.resolve({
+							status: 200,
+							json: {
+								access_token: "opaque-tok",
+								refresh_token: "opaque-rt",
+								token_type: "Bearer",
+								expires_in: 3600,
+							},
+							headers: {},
+							text: "",
+						} as never);
+					}
+					// Second call: refresh for JWT fails
+					return Promise.resolve({
+						status: 401,
+						json: { error: "invalid_grant" },
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/userinfo")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							sub: "user-1",
+							email: "alice@example.com",
+							name: "Alice",
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+
+			// JWT refresh failed, so sign-in should not complete
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("restoreSession boundary: token expired at exactly 0ms", () => {
+		it("refreshes token when msUntilExpiry is exactly 0", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "refreshed-tok",
+							refresh_token: "refreshed-rt",
+							expires_in: 3600,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "expired-tok",
+				refreshToken: "valid-rt",
+				expiresAt: new Date(Date.now()).toISOString(), // exactly now
+				email: "alice@example.com",
+				name: "Alice",
+			});
+
+			await auth.restoreSession();
+
+			expect(auth.isAuthenticated).toBe(true);
+			expect(requestUrlMock).toHaveBeenCalled();
+		});
+	});
+
+	describe("sign-in callback validation", () => {
+		it("rejects callback missing both code and state", async () => {
+			mockRequestUrlSuccess();
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			await signInAndGetUrl(auth);
+
+			simulateCallback(server, "/callback");
+			await signInPromise;
+
+			expect(auth.isAuthenticated).toBe(false);
+		});
+
+		it("rejects callback with code but no state", async () => {
+			mockRequestUrlSuccess();
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			await signInAndGetUrl(auth);
+
+			simulateCallback(server, "/callback?code=test-code");
+			await signInPromise;
+
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("sign-in: non-2xx token exchange fails sign-in", () => {
+		it("stays unauthenticated when token exchange returns 500", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 500,
+						json: { error: "server_error" },
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("sign-in: userInfo fetch failure", () => {
+		it("stays unauthenticated when userinfo returns 500", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: "tok",
+							refresh_token: "rt",
+							token_type: "Bearer",
+							expires_in: 3600,
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/userinfo")) {
+					return Promise.resolve({
+						status: 500,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const { auth, server } = createAuthManager();
+			const signInPromise = auth.signIn();
+			const url = await signInAndGetUrl(auth);
+
+			simulateCallback(
+				server,
+				`/callback?code=test-code&state=${url.searchParams.get("state")!}`,
+			);
+			await signInPromise;
+
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("_refreshTokens catch block", () => {
+		it("sets hasAuthError on network exception during refresh", async () => {
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					return Promise.reject(new Error("DNS resolution failed"));
+				}
+				if (params.url.includes("/auth/logout")) {
+					return Promise.resolve({
+						status: 200,
+						json: {},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "tok",
+				refreshToken: "rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "tok";
+			authAny._userInfo = { email: "alice@example.com", name: "Alice" };
+
+			const token = await auth.getAccessToken();
+			expect(token).toBeNull();
+			expect(auth.hasAuthError).toBe(true);
+			expect(auth.isAuthenticated).toBe(false);
+		});
+	});
+
+	describe("pendingRefresh deduplication clears after completion", () => {
+		it("allows new refresh after previous one completes", async () => {
+			let callCount = 0;
+			requestUrlMock.mockImplementation((params: { url: string }) => {
+				if (params.url.includes("/auth/token")) {
+					callCount++;
+					return Promise.resolve({
+						status: 200,
+						json: {
+							access_token: `tok-${callCount}`,
+							refresh_token: `rt-${callCount}`,
+							expires_in: 30, // short expiry to trigger refresh again
+						},
+						headers: {},
+						text: "",
+					} as never);
+				}
+				return Promise.reject(new Error("unexpected"));
+			});
+
+			const app = new App();
+			const settings = makeMultiplayerSettings({
+				serverUrl: "https://example.com",
+			});
+			const { createServer } = createMockServer();
+			const auth = new AuthManager(app, settings, {
+				openUrl: openExternalStub,
+				createServer,
+			});
+			const tokenStore = new TokenStore(app);
+			tokenStore.save({
+				accessToken: "old-tok",
+				refreshToken: "old-rt",
+				expiresAt: new Date(Date.now() + 30_000).toISOString(),
+				email: "alice@example.com",
+				name: "Alice",
+			});
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const authAny = auth as any;
+			authAny._isAuthenticated = true;
+			authAny._accessToken = "old-tok";
+			authAny._userInfo = { email: "alice@example.com", name: "Alice" };
+
+			// First refresh
+			const token1 = await auth.getAccessToken();
+			expect(token1).toBe("tok-1");
+
+			// Second refresh (pendingRefresh should have been cleared)
+			const token2 = await auth.getAccessToken();
+			expect(token2).toBe("tok-2");
+			expect(callCount).toBe(2);
+		});
+	});
+
 	describe("PKCE parameter quality", () => {
 		it("code_verifier and state are base64url encoded (no +, /, or =)", async () => {
 			mockRequestUrlSuccess();

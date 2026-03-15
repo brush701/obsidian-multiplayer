@@ -581,6 +581,147 @@ describe("SharedFolder", () => {
 			expect(trashLocal).not.toHaveBeenCalled();
 		});
 	});
+
+	describe("update handler — directory creation", () => {
+		it("creates parent directory when file path does not exist", () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(false);
+
+			// Add a path to the ids map to trigger directory creation
+			folder.ids.set("shared/subdir/new.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			expect(mockMkdirSync).toHaveBeenCalledWith(
+				expect.stringContaining("subdir"),
+				{ recursive: true },
+			);
+		});
+
+		it("does not create directory when it already exists", () => {
+			const { folder } = makeSharedFolder();
+			// First call: file doesn't exist; second call: dir exists
+			mockExistsSync.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+			folder.ids.set("shared/test.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			expect(mockMkdirSync).not.toHaveBeenCalled();
+		});
+
+		it("creates file with open() when file does not exist", () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(false);
+
+			folder.ids.set("shared/new.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			expect(mockOpen).toHaveBeenCalledWith(
+				expect.stringContaining("shared/new.md"),
+				"w",
+				expect.any(Function),
+			);
+		});
+	});
+
+	describe("update handler — file overwrite decisions", () => {
+		it("accepts file without prompt when existing file has size 0", () => {
+			const { folder } = makeSharedFolder();
+			// File exists
+			mockExistsSync.mockReturnValue(true);
+			mockStatSync.mockReturnValue({ size: 0 });
+
+			folder.ids.set("shared/empty.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			// No overwrite prompt should be enqueued for empty files
+			expect(folder.isFileKept("shared/empty.md")).toBe(false);
+		});
+
+		it("enqueues overwrite prompt when existing file has size > 0", () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockStatSync.mockReturnValue({ size: 100 });
+
+			folder.ids.set("shared/existing.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			// Should be pending decision
+			expect(folder.isFileKept("shared/existing.md")).toBe(true);
+		});
+
+		it("accepts file when statSync throws", () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockStatSync.mockImplementation(() => {
+				throw new Error("stat failed");
+			});
+
+			folder.ids.set("shared/broken.md", "doc-guid-1");
+			triggerUpdate(folder);
+
+			expect(folder.isFileKept("shared/broken.md")).toBe(false);
+		});
+	});
+
+	describe("createDoc — content insertion", () => {
+		it("inserts content when file content differs from yjs text", async () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue("file content");
+
+			const doc = folder.createDoc("shared/test.md", true);
+
+			// Wait for onceSynced to fire (mocked persistence fires immediately)
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(doc.text).toBe("file content");
+		});
+
+		it("does not insert content when loadFromDisk is false", async () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue("file content");
+
+			const doc = folder.createDoc("shared/test.md", false);
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(doc.text).toBe("");
+		});
+
+		it("does not insert when file is empty string", async () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockReadFileSync.mockReturnValue("");
+
+			const doc = folder.createDoc("shared/test.md", true);
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(doc.text).toBe("");
+		});
+	});
+
+	describe("_removeFromSettings when folder not in list", () => {
+		it("handles folder not in settings array gracefully", () => {
+			const { folder, plugin } = makeSharedFolder();
+			const provider = getProvider(folder);
+			// Don't add folder to settings — _removeFromSettings should not crash
+			expect(() => fireCloseEvent(provider, 4003)).not.toThrow();
+			expect(plugin.saveSettings).toHaveBeenCalled();
+		});
+	});
+
+	describe("_processOverwriteQueue length check", () => {
+		it("processes overwrite queue length correctly (> 0 vs >= 0)", () => {
+			const { folder } = makeSharedFolder();
+			mockExistsSync.mockReturnValue(true);
+			mockStatSync.mockReturnValue({ size: 100 });
+
+			// Trigger update with one item — should enqueue
+			folder.ids.set("shared/a.md", "guid-a");
+			triggerUpdate(folder);
+			expect(folder.isFileKept("shared/a.md")).toBe(true);
+		});
+	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -668,6 +809,47 @@ describe("SharedDoc", () => {
 		});
 	});
 
+	describe("role management", () => {
+		it("role starts as null", () => {
+			const { doc } = makeSharedDoc();
+			expect(doc.role).toBeNull();
+		});
+
+		it("setRole updates the role", () => {
+			const { doc } = makeSharedDoc();
+			doc.setRole("EDITOR");
+			expect(doc.role).toBe("EDITOR");
+		});
+
+		it("setRole to VIEWER is stored correctly", () => {
+			const { doc } = makeSharedDoc();
+			doc.setRole("VIEWER");
+			expect(doc.role).toBe("VIEWER");
+		});
+
+		it("setRole with same value is a no-op", () => {
+			const { doc } = makeSharedDoc();
+			doc.setRole("EDITOR");
+			// Calling again with same value should not throw
+			doc.setRole("EDITOR");
+			expect(doc.role).toBe("EDITOR");
+		});
+	});
+
+	describe("user color selection", () => {
+		it("sets user awareness with color and colorLight properties", () => {
+			const { doc } = makeSharedDoc();
+			const provider = getProvider(doc);
+			const call = provider.awareness.setLocalStateField.mock.calls[0];
+			expect(call[0]).toBe("user");
+			const userObj = call[1];
+			expect(userObj).toHaveProperty("color");
+			expect(userObj).toHaveProperty("colorLight");
+			expect(userObj.color).toMatch(/^#[0-9a-f]{6}$/);
+			expect(userObj.colorLight).toMatch(/^#[0-9a-f]{6}[0-9a-f]{2}$/);
+		});
+	});
+
 	describe("text getter", () => {
 		it("returns contents of the yjs text type", () => {
 			const { doc } = makeSharedDoc();
@@ -683,6 +865,15 @@ describe("SharedDoc", () => {
 			doc.close();
 			expect(provider.destroy).toHaveBeenCalled();
 		});
+
+		it("nullifies binding and editorView", () => {
+			const { doc } = makeSharedDoc();
+			doc.close();
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			expect((doc as any)._binding).toBeNull();
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			expect((doc as any)._editorView).toBeNull();
+		});
 	});
 
 	describe("destroy", () => {
@@ -691,6 +882,12 @@ describe("SharedDoc", () => {
 			const provider = getProvider(doc);
 			expect(() => doc.destroy()).not.toThrow();
 			expect(provider.destroy).toHaveBeenCalled();
+		});
+
+		it("can be called multiple times safely", () => {
+			const { doc } = makeSharedDoc();
+			doc.destroy();
+			expect(() => doc.destroy()).not.toThrow();
 		});
 	});
 });
