@@ -39,13 +39,21 @@ export function loadCassette(name: string): Cassette {
 /**
  * Set up a nock interceptor from a cassette.
  * Returns the nock scope for assertion (e.g. scope.isDone()).
+ *
+ * @param requireAuth When true (default for authenticated endpoints), the
+ *   interceptor requires an Authorization header matching `Bearer *`.
  */
-export function playCassette(baseUrl: string, name: string): nock.Scope {
+export function playCassette(
+  baseUrl: string,
+  name: string,
+  opts?: { requireAuth?: boolean },
+): nock.Scope {
   const cassette = loadCassette(name)
   const scope = nock(baseUrl)
 
   const { method, path, body } = cassette.request
   const { status, body: responseBody } = cassette.response
+  const requireAuth = opts?.requireAuth ?? true
 
   let interceptor: nock.Interceptor
   switch (method) {
@@ -63,6 +71,10 @@ export function playCassette(baseUrl: string, name: string): nock.Scope {
       break
     default:
       throw new Error(`Unsupported HTTP method in cassette: ${method}`)
+  }
+
+  if (requireAuth) {
+    interceptor = interceptor.matchHeader('Authorization', /^Bearer .+/)
   }
 
   if (responseBody === null) {

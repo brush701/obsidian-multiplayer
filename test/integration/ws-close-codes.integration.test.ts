@@ -26,12 +26,14 @@ interface TestServer {
   connections: WsWebSocket[]
   /** Close all connected clients with a specific code. */
   closeAll(code: number, reason?: string): void
-  /** Wait for at least n connections. */
-  waitForConnection(n?: number): Promise<WsWebSocket>
+  /** Wait for the next new connection (registers a waiter before checking). */
+  waitForConnection(): Promise<WsWebSocket>
+  /** Wait until at least n total connections have been established. */
+  waitForConnections(n: number): Promise<void>
   shutdown(): Promise<void>
 }
 
-function createTestServer(): Promise<TestServer> {
+function createTestServer(opts?: { relay?: boolean }): Promise<TestServer> {
   return new Promise((resolve) => {
     const wss = new WebSocketServer({ port: 0 })
     const connections: WsWebSocket[] = []
@@ -39,6 +41,19 @@ function createTestServer(): Promise<TestServer> {
 
     wss.on('connection', (ws) => {
       connections.push(ws)
+
+      // When relay mode is on, broadcast incoming messages to all other clients.
+      // This mimics a stock y-websocket server's core behaviour.
+      if (opts?.relay) {
+        ws.on('message', (data: Buffer) => {
+          for (const peer of connections) {
+            if (peer !== ws && peer.readyState === WsWebSocket.OPEN) {
+              peer.send(data)
+            }
+          }
+        })
+      }
+
       const waiter = connectionWaiters.shift()
       if (waiter) waiter(ws)
     })
@@ -60,11 +75,26 @@ function createTestServer(): Promise<TestServer> {
           }
         },
         waitForConnection(): Promise<WsWebSocket> {
-          if (connections.length > 0) {
-            return Promise.resolve(connections[connections.length - 1])
-          }
+          // Always waits for the *next* new connection, never resolves with
+          // an already-established one.
           return new Promise((res) => {
             connectionWaiters.push(res)
+          })
+        },
+        waitForConnections(n: number): Promise<void> {
+          if (connections.length >= n) return Promise.resolve()
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(
+              () => reject(new Error(`Timed out waiting for ${n} connections`)),
+              5000,
+            )
+            const check = setInterval(() => {
+              if (connections.length >= n) {
+                clearInterval(check)
+                clearTimeout(timeout)
+                resolve()
+              }
+            }, 20)
           })
         },
         shutdown(): Promise<void> {
@@ -199,17 +229,17 @@ describe('WebSocket close codes', () => {
     server.closeAll(1000, 'Normal closure')
 
     // Wait for the reconnection (new connection to the server)
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const check = setInterval(() => {
         if (server.connections.length > initialConnectionCount) {
           clearInterval(check)
           resolve()
         }
       }, 50)
-      // Safety timeout
+      // Fail if no reconnection within timeout
       setTimeout(() => {
         clearInterval(check)
-        resolve()
+        reject(new Error('Timed out waiting for reconnection'))
       }, 5000)
     })
 
@@ -227,7 +257,9 @@ describe('document convergence', () => {
   let provider2: WebsocketProvider
 
   beforeEach(async () => {
-    server = await createTestServer()
+    // Relay mode: messages from one client are broadcast to all others,
+    // mimicking a stock y-websocket server.
+    server = await createTestServer({ relay: true })
     ydoc1 = new Y.Doc()
     ydoc2 = new Y.Doc()
   })
@@ -240,15 +272,7 @@ describe('document convergence', () => {
     await server.shutdown()
   })
 
-  it('two clients connecting to the same room see document state via WS relay', async () => {
-    // Note: A stock y-websocket server would relay updates between clients.
-    // Our minimal test server does NOT relay — it just accepts connections.
-    // This test verifies the transport layer works; full convergence would
-    // require running a y-websocket server process.
-    //
-    // For now, we verify both providers connect and can send data over the
-    // WebSocket transport layer.
-
+  it('two clients converge on document state within 2 seconds of an edit', async () => {
     provider1 = new WebsocketProvider(server.url, 'shared-room', ydoc1, {
       connect: true,
       WebSocketPolyfill: WsWebSocket as unknown as typeof WebSocket,
@@ -259,11 +283,31 @@ describe('document convergence', () => {
       WebSocketPolyfill: WsWebSocket as unknown as typeof WebSocket,
     })
 
-    // Wait for both connections
-    await server.waitForConnection()
-    // Small delay for second connection
-    await new Promise((r) => setTimeout(r, 200))
+    // Wait for both to connect
+    await server.waitForConnections(2)
 
-    expect(server.connections.length).toBeGreaterThanOrEqual(2)
+    // Allow sync handshake to settle
+    await new Promise((r) => setTimeout(r, 300))
+
+    // Client 1 makes an edit
+    ydoc1.getText('contents').insert(0, 'Hello from client 1')
+
+    // Wait for convergence — client 2 should see the edit within 2 seconds
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('Documents did not converge within 2 seconds')),
+        2000,
+      )
+      const check = setInterval(() => {
+        const text2 = ydoc2.getText('contents').toString()
+        if (text2 === 'Hello from client 1') {
+          clearInterval(check)
+          clearTimeout(timeout)
+          resolve()
+        }
+      }, 50)
+    })
+
+    expect(ydoc2.getText('contents').toString()).toBe('Hello from client 1')
   })
 })

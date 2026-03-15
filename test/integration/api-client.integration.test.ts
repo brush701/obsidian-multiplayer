@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import nock from 'nock'
-import { TektiteApiClient } from '../../src/api'
+import { TektiteApiClient, AuthRequiredError } from '../../src/api'
 import type { IAuthManager, RoomListItem, RoomDetail, CreateRoomResult, JoinResult, InviteResponse, MemberRoleResult, VersionInfo, MyRoleResult } from '../../src/types'
 import { playCassette, loadCassette, fetchRequestUrl } from './cassette-helpers'
 
@@ -74,7 +74,7 @@ describe('cassette discipline', () => {
 
 describe('getVersion', () => {
   it('deserialises VersionInfo from server response', async () => {
-    const scope = playCassette(SERVER, 'getVersion')
+    const scope = playCassette(SERVER, 'getVersion', { requireAuth: false })
     const client = new TektiteApiClient(SERVER, makeAuth(null), fetchRequestUrl)
 
     const result: VersionInfo = await client.getVersion()
@@ -288,22 +288,17 @@ describe('deleteRoom', () => {
 // ── Token refresh on expiry ──────────────────────────────────────────────────
 
 describe('token refresh', () => {
-  it('calls getAccessToken() before each request — expired token triggers refresh', async () => {
-    // Simulate: first call returns expired (null), second call returns fresh token.
-    // The auth manager's getAccessToken() is responsible for refreshing internally.
+  it('getAccessToken() is called per-request so AuthManager can refresh transparently', async () => {
+    // The ApiClient delegates token management entirely to AuthManager.
+    // Each request calls getAccessToken(), which may internally refresh an
+    // expired token before returning. We verify the returned token reaches
+    // the server via the Authorization header.
     const auth = makeAuth()
-    let callCount = 0
-    ;(auth.getAccessToken as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => {
-        callCount++
-        if (callCount === 1) return 'refreshed-token'
-        return 'refreshed-token'
-      },
-    )
+    ;(auth.getAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue('fresh-token')
 
     const scope = nock(SERVER)
       .get('/api/rooms')
-      .matchHeader('Authorization', 'Bearer refreshed-token')
+      .matchHeader('Authorization', 'Bearer fresh-token')
       .reply(200, [])
 
     const client = new TektiteApiClient(SERVER, auth, fetchRequestUrl)
@@ -314,8 +309,9 @@ describe('token refresh', () => {
     expect(scope.isDone()).toBe(true)
   })
 
-  it('second API call triggers a second getAccessToken() call', async () => {
-    // Ensures token is not cached — each request gets a fresh token
+  it('each API call fetches a fresh token — tokens are not cached by the client', async () => {
+    // If the AuthManager returns a new token on the second call (e.g. after
+    // a silent refresh), the client must send the updated token.
     const auth = makeAuth()
     let callCount = 0
     ;(auth.getAccessToken as ReturnType<typeof vi.fn>).mockImplementation(
@@ -339,5 +335,15 @@ describe('token refresh', () => {
 
     expect(auth.getAccessToken).toHaveBeenCalledTimes(2)
     expect(scope.isDone()).toBe(true)
+  })
+
+  it('null token from getAccessToken() throws AuthRequiredError — no network call made', async () => {
+    const auth = makeAuth(null)
+
+    // No nock scope — if a network call is made, nock will error
+    const client = new TektiteApiClient(SERVER, auth, fetchRequestUrl)
+
+    await expect(client.listRooms()).rejects.toThrow('Authentication required')
+    expect(auth.getAccessToken).toHaveBeenCalledTimes(1)
   })
 })
