@@ -21,7 +21,7 @@ jobs:
 
       - run: npm test
 
-  integration:
+  contract:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
@@ -35,8 +35,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Run integration tests
-        run: npm run test:integration
+      - name: Run contract tests
+        run: npm run test:contract
 
   mutation:
     runs-on: ubuntu-latest

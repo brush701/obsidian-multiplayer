@@ -1,16 +1,18 @@
-// Suite: WebSocket Close Codes — Integration
-// Scope: Integration
-// Spec: TASK-36 — [Testing-S7] Integration test layer (WebSocket provider + API)
+// Suite: WebSocket Close Codes — Contract
+// Scope: Contract
+// Spec: TASK-36 — [Testing-S7] Contract test layer (WebSocket provider)
 // What this suite validates:
-//   - Plugin's SharedFolder correctly handles WebSocket close codes 4001, 4003,
-//     4004 when the server terminates the connection.
-//   - Tests run against a local WS test server (not production).
-//   - Plugin reconnects automatically after a transient disconnect (normal close).
+//   - y-websocket correctly emits connection-close events with close codes
+//     4001, 4003, 4004 when a WS server sends them.
+//   - Provider reconnects automatically after a transient disconnect.
+//   - Two Yjs docs converge via a relay server (transport-level contract).
 //
 // What is explicitly NOT tested here:
-//   - Yjs document convergence between multiple clients (would require full
-//     y-websocket server with doc persistence)
-//   - API client integration — see api-client.integration.test.ts
+//   - Actual tektite-server behaviour (auth, room access, viewer guards) —
+//     real integration tests require a gamma environment.
+//   - Plugin handler side effects (signOut, removeFromSettings) — covered
+//     by unit tests in sharedTypes.test.ts.
+//   - API client contract — see api-client.contract.test.ts
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WebSocketServer, WebSocket as WsWebSocket } from 'ws'

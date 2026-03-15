@@ -1,6 +1,6 @@
-// Suite: TektiteApiClient — Integration
-// Scope: Integration
-// Spec: TASK-36 — [Testing-S7] Integration test layer (WebSocket provider + API)
+// Suite: TektiteApiClient — Contract
+// Scope: Contract
+// Spec: TASK-36 — [Testing-S7] Contract test layer (API client)
 // What this suite validates:
 //   - API client correctly serialises requests and deserialises server responses
 //     when exercised against VCR cassettes (nock interceptors replaying recorded
@@ -8,10 +8,12 @@
 //   - Expired access token triggers a refresh before the API call proceeds.
 //
 // What is explicitly NOT tested here:
+//   - Actual server behaviour — cassettes are hand-authored from API.md, not
+//     recorded from a live server. Real integration tests require a gamma env.
 //   - Network-level failures (timeout, DNS, TLS) — those belong in unit tests
-//   - WebSocket integration — see ws-close-codes.integration.test.ts
+//   - WebSocket contract — see ws-close-codes.contract.test.ts
 //
-// VCR cassettes are in test/integration/cassettes/ and tagged with apiVersion.
+// VCR cassettes are in test/contract/cassettes/ and tagged with apiVersion.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import nock from 'nock'
