@@ -1,0 +1,16 @@
+{
+  "_cassette": {
+    "apiVersion": "1",
+    "serverVersion": "1.0.0-draft",
+    "recordedAt": "2026-03-15T00:00:00.000Z",
+    "description": "DELETE /api/rooms/:guid — delete room"
+  },
+  "request": {
+    "method": "DELETE",
+    "path": "/api/rooms/770e8400-e29b-41d4-a716-446655440000"
+  },
+  "response": {
+    "status": 204,
+    "body": null
+  }
+}

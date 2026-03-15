@@ -1,0 +1,22 @@
+{
+  "_cassette": {
+    "apiVersion": "1",
+    "serverVersion": "1.0.0-draft",
+    "recordedAt": "2026-03-15T00:00:00.000Z",
+    "description": "POST /api/rooms/:guid/invites — create single-use invite"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/rooms/770e8400-e29b-41d4-a716-446655440000/invites",
+    "body": {
+      "role": "EDITOR",
+      "expiresIn": "7d"
+    }
+  },
+  "response": {
+    "status": 201,
+    "body": {
+      "inviteUrl": "https://multiplayer.company.com/join?token=aab38e00-1234-5678-9abc-def012345678"
+    }
+  }
+}
