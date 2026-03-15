@@ -1,3 +1,7 @@
+// Suite: DocExtensionManager
+// Scope: Unit
+// Spec: P5-S2 — Extension array regression
+
 import { describe, it, expect } from "vitest";
 import { Compartment } from "@codemirror/state";
 import { DocExtensionManager } from "../src/docExtensions";

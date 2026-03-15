@@ -6,8 +6,10 @@
 //   - clear() removes all tokens so load() returns null
 //   - load() returns null when keys are missing or only partially present
 //   - save() overwrites previously stored values
+//   - Property: stored tokens round-trip correctly for arbitrary valid strings
 
 import { describe, it, expect } from 'vitest'
+import fc from 'fast-check'
 import { App } from 'obsidian'
 import { TokenStore } from '../src/tokenStore'
 import type { StoredTokens } from '../src/tokenStore'
@@ -75,5 +77,20 @@ describe('TokenStore', () => {
     store.save(updated)
 
     expect(store.load()).toEqual(updated)
+  })
+
+  it('property: stored tokens round-trip correctly for any valid string values', () => {
+    const nonEmpty = fc.string({ minLength: 1 })
+    fc.assert(
+      fc.property(
+        nonEmpty, nonEmpty, nonEmpty, nonEmpty, nonEmpty,
+        (accessToken, refreshToken, expiresAt, email, name) => {
+          const store = createTokenStore()
+          const tokens: StoredTokens = { accessToken, refreshToken, expiresAt, email, name }
+          store.save(tokens)
+          expect(store.load()).toEqual(tokens)
+        },
+      ),
+    )
   })
 })
