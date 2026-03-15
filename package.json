@@ -7,12 +7,16 @@
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"test": "vitest run --coverage",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"test:mutation": "npx stryker run"
 	},
 	"keywords": [],
 	"author": "Ben Rush",
 	"license": "MIT",
 	"devDependencies": {
+		"@stryker-mutator/core": "~8.7.0",
+		"@stryker-mutator/typescript-checker": "~8.7.0",
+		"@stryker-mutator/vitest-runner": "~8.7.0",
 		"@types/node": "^22.0.0",
 		"@typescript-eslint/eslint-plugin": "^5.29.0",
 		"@typescript-eslint/parser": "^5.29.0",
