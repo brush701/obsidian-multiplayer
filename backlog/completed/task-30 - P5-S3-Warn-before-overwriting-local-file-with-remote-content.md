@@ -1,7 +1,7 @@
 ---
 id: TASK-30
 title: '[P5-S3] Warn before overwriting local file with remote content'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
 updated_date: '2026-03-12 03:35'

@@ -1,3 +1,9 @@
+// Suite: Context menu
+// Scope: Unit
+// Spec: TASK-22 — [P3-S7] Context menu updates
+//        TASK-25 — [P4-S2] Read-only editor for VIEWERs
+//        TASK-27 — [P4-S4] Role-gated UI elements
+
 import { describe, it, expect, vi } from 'vitest'
 import type { RoomRole } from '../src/types'
 

@@ -1,3 +1,7 @@
+// Suite: FileOverwriteWarningModal
+// Scope: Unit
+// Spec: TASK-30 — [P5-S3] Warn before overwriting local file with remote content
+
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("obsidian");

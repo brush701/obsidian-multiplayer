@@ -4,7 +4,7 @@ title: '[P3-S3] SharedFolderModal: Join tab'
 status: Done
 assignee: []
 created_date: '2026-03-08 16:27'
-updated_date: '2026-03-09 00:21'
+updated_date: '2026-03-12 04:51'
 labels:
   - enhancement
   - 'epic: P3 - Room Management'
@@ -137,17 +137,11 @@ Replace the Join tab placeholder in `src/modals.ts` with a functional join-by-in
 - **Error handling mirrors Create tab** for consistency, with the addition of 404/410 special-casing per the spec.
 <!-- SECTION:PLAN:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented Join tab in SharedFolderModal with invite link/token parsing. Merged via PR #94.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Implementation matches all acceptance criteria
 - [x] #2 Unit tests cover: success path, token extraction (URL and raw), AuthRequiredError, 404/410 ApiRequestError, other ApiRequestError, double-click guard, empty input guard
 - [x] #3 All existing tests pass (`npm test`)
 - [x] #4 Build succeeds (`npm run build`)
-- [ ] #5 Code reviewed via PR
+- [x] #5 Code reviewed via PR
 <!-- DOD:END -->

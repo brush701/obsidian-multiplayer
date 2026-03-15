@@ -1,3 +1,7 @@
+// Suite: SharedDoc role-based behaviour
+// Scope: Unit
+// Spec: TASK-25 — [P4-S2] Read-only editor for VIEWERs
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi } from "vitest";
 

@@ -175,6 +175,27 @@ describe('SharedFolderModal — Create tab', () => {
 
       expect(createRoom).not.toHaveBeenCalled()
     })
+
+    it('disables Create Room button when name is empty', () => {
+      const { modal, inputEl, btnEl } = buildModal('folder')
+      inputEl.value = ''
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(modal as any).updateCreateBtnState()
+
+      expect(btnEl.disabled).toBe(true)
+    })
+
+    it('enables Create Room button when name is non-empty', () => {
+      const { modal, inputEl, btnEl } = buildModal('folder')
+      btnEl.disabled = true
+      inputEl.value = 'My Room'
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(modal as any).updateCreateBtnState()
+
+      expect(btnEl.disabled).toBe(false)
+    })
   })
 })
 

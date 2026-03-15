@@ -1,6 +1,15 @@
 import { createWriteStream, read, readFile, readFileSync, writeFileSync } from "fs"
 import JSZip from 'jszip'
 
+/**
+ * Extract the GUID from a backup zip entry path.
+ * The GUID is the second-to-last segment: `<guid>/updates` → `<guid>`.
+ */
+export function extractGuidFromPath(path: string): string {
+    const components = path.split("/")
+    return components[components.length - 2]
+}
+
 export function backup(path: string) {
     let file = path + "/" + Date.now().toString() + "-multiplayer-backup.zip"
     let zip: JSZip = new JSZip()
@@ -68,8 +77,7 @@ export function loadBackup(filePath: string) {
                 if (path.includes("updates")) {
                     file.async('text').then(value => {
                         let bak = JSON.parse(value)
-                        const components = path.split("/")
-                        const guid = components[components.length - 2]
+                        const guid = extractGuidFromPath(path)
 
                         let req = window.indexedDB.open(guid)
 
