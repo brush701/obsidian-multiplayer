@@ -1,3 +1,9 @@
+// Suite: SharedFolder & SharedDoc
+// Scope: Unit
+// Spec: TASK-6 — [P1-S4] Integrate y-websocket provider
+//        TASK-13 — [P2-S6] Token injection into WebSocket connections
+//        TASK-31 — [Testing-S2] Unit tests for P1 — Transport Migration
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
