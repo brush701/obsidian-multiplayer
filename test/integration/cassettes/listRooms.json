@@ -1,0 +1,29 @@
+{
+  "_cassette": {
+    "apiVersion": "1",
+    "serverVersion": "1.0.0-draft",
+    "recordedAt": "2026-03-15T00:00:00.000Z",
+    "description": "GET /api/rooms — list all rooms for authenticated user"
+  },
+  "request": {
+    "method": "GET",
+    "path": "/api/rooms"
+  },
+  "response": {
+    "status": 200,
+    "body": [
+      {
+        "guid": "770e8400-e29b-41d4-a716-446655440000",
+        "name": "Q4 Planning",
+        "role": "OWNER",
+        "orgId": "880e8400-e29b-41d4-a716-446655440000"
+      },
+      {
+        "guid": "990e8400-e29b-41d4-a716-446655440000",
+        "name": "Engineering Hub",
+        "role": "EDITOR",
+        "orgId": "880e8400-e29b-41d4-a716-446655440000"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "_cassette": {
+    "apiVersion": "1",
+    "serverVersion": "1.0.0-draft",
+    "recordedAt": "2026-03-15T00:00:00.000Z",
+    "description": "PUT /api/rooms/:guid/members/:userId — change member role"
+  },
+  "request": {
+    "method": "PUT",
+    "path": "/api/rooms/770e8400-e29b-41d4-a716-446655440000/members/660e8400-e29b-41d4-a716-446655440000",
+    "body": {
+      "role": "VIEWER"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "userId": "660e8400-e29b-41d4-a716-446655440000",
+      "role": "VIEWER"
+    }
+  }
+}
