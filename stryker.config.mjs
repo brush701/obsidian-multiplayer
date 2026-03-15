@@ -21,6 +21,5 @@ export default {
   },
   timeoutMS: 30000,
   timeoutFactor: 2,
-  concurrency: 4,
   cleanTempDir: 'always',
 };

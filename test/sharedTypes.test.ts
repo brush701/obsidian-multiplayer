@@ -581,11 +581,6 @@ describe("SharedFolder", () => {
 			expect(trashLocal).not.toHaveBeenCalled();
 		});
 	});
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SharedDoc
-// ═══════════════════════════════════════════════════════════════════════════
 
 	describe("update handler — directory creation", () => {
 		it("creates parent directory when file path does not exist", () => {
@@ -727,6 +722,11 @@ describe("SharedFolder", () => {
 			expect(folder.isFileKept("shared/a.md")).toBe(true);
 		});
 	});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SharedDoc
+// ═══════════════════════════════════════════════════════════════════════════
 
 describe("SharedDoc", () => {
 	describe("constructor", () => {
@@ -865,6 +865,15 @@ describe("SharedDoc", () => {
 			doc.close();
 			expect(provider.destroy).toHaveBeenCalled();
 		});
+
+		it("nullifies binding and editorView", () => {
+			const { doc } = makeSharedDoc();
+			doc.close();
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			expect((doc as any)._binding).toBeNull();
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			expect((doc as any)._editorView).toBeNull();
+		});
 	});
 
 	describe("destroy", () => {
@@ -879,18 +888,6 @@ describe("SharedDoc", () => {
 			const { doc } = makeSharedDoc();
 			doc.destroy();
 			expect(() => doc.destroy()).not.toThrow();
-		});
-	});
-
-	describe("close", () => {
-		it("nullifies binding and editorView", () => {
-			const { doc } = makeSharedDoc();
-			doc.close();
-			// binding should be null after close (accessing it recreates)
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			expect((doc as any)._binding).toBeNull();
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			expect((doc as any)._editorView).toBeNull();
 		});
 	});
 });
